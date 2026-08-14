@@ -11,8 +11,9 @@ describe('RestApiClient', () => {
     const api = new RestApiClient('https://api.example.com/v1', 'mykey', 'mysecret', fetchFn);
     await api.getUser();
     const [, init] = fetchFn.mock.calls[0]!;
-    const auth = (init?.headers as Record<string, string>)['Authorization'];
-    expect(auth).toBe('Basic ' + Buffer.from('mykey:mysecret').toString('base64'));
+    const headers = init?.headers as Record<string, string>;
+    expect(headers['Authorization']).toBe('Basic ' + Buffer.from('mykey:mysecret').toString('base64'));
+    expect(headers['User-Agent']).toMatch(/^testingbot-mobilewright-driver\/\d+\.\d+\.\d+ /);
   });
 
   it('raises AuthenticationError on 401', async () => {

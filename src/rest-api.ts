@@ -4,6 +4,7 @@ import { basename } from 'node:path';
 import createDebug from 'debug';
 import { AuthenticationError, RestApiError } from './errors.js';
 import type { FetchFn } from './webdriver-client.js';
+import { USER_AGENT } from './version.js';
 
 const debug = createDebug('testingbot:rest');
 
@@ -96,7 +97,7 @@ export class RestApiClient {
     form.append('file', new Blob([data]), basename(filePath));
     const response = await this.fetchFn(`${this.apiUrl}/storage`, {
       method: 'POST',
-      headers: { Authorization: this.auth },
+      headers: { Authorization: this.auth, 'User-Agent': USER_AGENT },
       body: form,
     });
     return await this.parse(response, 'POST /storage') as StorageEntry;
@@ -134,6 +135,7 @@ export class RestApiClient {
       method,
       headers: {
         Authorization: this.auth,
+        'User-Agent': USER_AGENT,
         ...(body ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}),
       },
       body,

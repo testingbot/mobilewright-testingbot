@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { WebDriverError } from '../../src/errors.js';
+import { VERSION } from '../../src/version.js';
 import { WebDriverClient, type FetchFn } from '../../src/webdriver-client.js';
 
 const json = (value: unknown, status = 200) =>
@@ -17,6 +18,8 @@ describe('WebDriverClient', () => {
     expect(url).toBe('https://hub.example.com/wd/hub/session');
     expect(init?.method).toBe('POST');
     expect(JSON.parse(init?.body as string)).toEqual({ capabilities: { alwaysMatch: {}, firstMatch: [{}] } });
+    expect((init?.headers as Record<string, string>)['User-Agent'])
+      .toBe(`testingbot-mobilewright-driver/${VERSION} (node ${process.version})`);
   });
 
   it('maps W3C error responses to WebDriverError with code and message', async () => {

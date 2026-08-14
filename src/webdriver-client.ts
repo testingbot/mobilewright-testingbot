@@ -1,5 +1,6 @@
 import createDebug from 'debug';
 import { WebDriverError } from './errors.js';
+import { USER_AGENT } from './version.js';
 
 const debug = createDebug('testingbot:webdriver');
 
@@ -103,7 +104,7 @@ export class WebDriverClient {
     try {
       response = await this.fetchFn(url, {
         method,
-        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        headers: { 'Content-Type': 'application/json; charset=utf-8', 'User-Agent': USER_AGENT },
         body: body === undefined ? undefined : JSON.stringify(body),
         signal,
       });
