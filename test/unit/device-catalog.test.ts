@@ -18,9 +18,9 @@ const browsers = [
   { name: 'safari', platform: 'SEQUOIA', version: '18.0' },
 ];
 
-function fakeApi(available = devices) {
+function fakeApi(available = devices, all = devices) {
   return {
-    getDevices: vi.fn(async () => available),
+    getDevices: vi.fn(async (onlyAvailable: boolean) => (onlyAvailable ? available : all)),
     getDevice: vi.fn(async (id: string | number) => devices.find((d) => String(d.id) === String(id))),
     getBrowsers: vi.fn(async () => browsers),
   } as unknown as RestApiClient & { getDevices: ReturnType<typeof vi.fn>; getBrowsers: ReturnType<typeof vi.fn> };
@@ -36,11 +36,21 @@ describe('DeviceCatalog.pickRealDevice', () => {
     expect(pick).toEqual({ deviceName: 'Pixel 8', platformVersion: '14', real: true });
   });
 
-  it('throws NoDeviceAvailableError when nothing matches', async () => {
+  it('treats no matching physical device as a config error', async () => {
     const catalog = new DeviceCatalog(fakeApi());
-    await expect(
-      catalog.pickRealDevice({ platform: 'ios', osVersion: '>=18' }, new Map()),
-    ).rejects.toBeInstanceOf(NoDeviceAvailableError);
+    const attempt = catalog.pickRealDevice({ platform: 'ios', osVersion: '>=18' }, new Map());
+    await expect(attempt).rejects.toThrow(/No TestingBot real device matches/);
+    await expect(attempt).rejects.not.toBeInstanceOf(NoDeviceAvailableError);
+  });
+
+  it('prefers available devices but falls back to busy ones (the hub queues)', async () => {
+    // Pixel 8 is busy (absent from /devices/available) but still a candidate.
+    const catalog = new DeviceCatalog(fakeApi(devices.filter((d) => d.name !== 'Pixel 8')));
+    const pick = await catalog.pickRealDevice({ platform: 'android' }, new Map());
+    expect(pick.deviceName).toBe('Galaxy S23'); // the available one wins
+    const busyOnly = new DeviceCatalog(fakeApi([], devices));
+    const fallback = await busyOnly.pickRealDevice({ platform: 'android', deviceNamePattern: 'pixel' }, new Map());
+    expect(fallback.deviceName).toBe('Pixel 8'); // busy but matching — hub will queue
   });
 
   it('prefers devices not already pinned by other slots and reserves its pick', async () => {
@@ -56,18 +66,9 @@ describe('DeviceCatalog.pickRealDevice', () => {
     const catalog = new DeviceCatalog(api);
     await catalog.pickRealDevice({ platform: 'android' }, new Map());
     await catalog.pickRealDevice({ platform: 'android' }, new Map());
-    expect(api.getDevices).toHaveBeenCalledTimes(1);
+    expect(api.getDevices).toHaveBeenCalledTimes(2); // one all + one available fetch, then cached
   });
 
-  it('drops the cache after a miss so the pool retry refetches', async () => {
-    const api = fakeApi();
-    const catalog = new DeviceCatalog(api);
-    await expect(catalog.pickRealDevice({ platform: 'ios', osVersion: '>=18' }, new Map()))
-      .rejects.toBeInstanceOf(NoDeviceAvailableError);
-    await expect(catalog.pickRealDevice({ platform: 'ios', osVersion: '>=18' }, new Map()))
-      .rejects.toBeInstanceOf(NoDeviceAvailableError);
-    expect(api.getDevices).toHaveBeenCalledTimes(2);
-  });
 });
 
 describe('DeviceCatalog.pickVirtualDevice', () => {

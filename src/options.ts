@@ -29,7 +29,11 @@ export interface TestingBotDriverOptions {
   hubUrl?: string;
   /** REST API base URL. Default: https://api.testingbot.com/v1 */
   apiUrl?: string;
-  /** Max time to wait for a device allocation (POST /session), in ms. Default: 300000 (5 min). */
+  /**
+   * Max time to wait for a device allocation (POST /session), in ms. The hub
+   * queues the request until a matching device frees up and gives up after
+   * 390s, so the default (395s) lets the hub's own verdict arrive first.
+   */
   allocationTimeout?: number;
   /** Per-WebDriver-command timeout, in ms. Default: 60000. */
   commandTimeout?: number;
@@ -87,7 +91,7 @@ export function resolveOptions(options: TestingBotDriverOptions = {}): ResolvedO
     secret: options.secret ?? process.env['TESTINGBOT_SECRET'] ?? process.env['TB_SECRET'] ?? '',
     hubUrl: (options.hubUrl ?? 'https://hub.testingbot.com/wd/hub').replace(/\/+$/, ''),
     apiUrl: (options.apiUrl ?? 'https://api.testingbot.com/v1').replace(/\/+$/, ''),
-    allocationTimeout: options.allocationTimeout ?? 300_000,
+    allocationTimeout: options.allocationTimeout ?? 395_000,
     commandTimeout: options.commandTimeout ?? 60_000,
     idleTimeout: options.idleTimeout ?? 230,
     maxDuration: options.maxDuration,

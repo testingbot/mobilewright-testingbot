@@ -91,9 +91,15 @@ export class FakeHub {
     // ─── WebDriver ────────────────────────────────────────────────
     if (method === 'POST' && path === '/wd/hub/session') {
       if (this.allocationDelay) await new Promise((r) => setTimeout(r, this.allocationDelay));
+      // Mirror the real hub: a client abort while queued removes the pending
+      // request (protocols/webdriver.js 'aborted' -> removePendingRequest).
+      // req.destroyed is true after normal body consumption, so check the
+      // socket — it is only gone when the client actually disconnected.
+      if (req.socket.destroyed) return;
       if (this.busyCount > 0) {
         this.busyCount -= 1;
-        return wd({ error: 'session not created', message: 'All devices are busy, please retry' }, 500);
+        // Real hub wording (lib/registry.js): queue TTL expired.
+        return wd({ error: 'session not created', message: 'Waited too long for job to start: 390000 msecs: {}' }, 500);
       }
       const capabilities = (body as { capabilities?: { alwaysMatch?: Record<string, unknown> } })
         ?.capabilities?.alwaysMatch ?? {};

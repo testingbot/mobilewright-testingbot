@@ -51,19 +51,17 @@ export class RestApiError extends TestingBotError {
   }
 }
 
-// Hub messages that indicate a temporary shortage rather than a permanent
-// failure. TestingBot has no machine-readable "no device available" code yet,
-// so classification rests on these patterns (fixtures captured from the live
-// hub should extend this list).
+// The hub has no structured error type — every failure path returns a string
+// (its own analytics.js classifies faults by these exact substrings, which
+// makes this list canonical). Retriable = temporary shortage or contention;
+// everything else (bad capabilities, unknown browserName, ...) is permanent.
 const RETRIABLE_PATTERNS = [
-  /no.{0,20}devices?.{0,20}(available|found)/i,
-  /all.{0,20}devices?.{0,20}(busy|in use)/i,
-  /device.{0,20}(busy|unavailable|in use)/i,
-  /queue/i,
-  /concurren/i, // "concurrency limit", "too many concurrent sessions"
-  /maximum number of.{0,20}(sessions|tests)/i,
-  /session limit/i,
-  /timed? ?out waiting for/i,
+  /Waited too long for job to start/i,    // hub queue TTL (390s) expired (WebDriverError prefixes the code, so no ^ anchor)
+  /unable to fulfill your request/i,      // no node currently matches (capacity)
+  /device is currently in use/i,          // pinned real device busy
+  /experiencing high load/i,
+  /Could not acquire processing lock/i,
+  /temporarily busy/i,
 ];
 
 /**
@@ -75,6 +73,12 @@ const RETRIABLE_PATTERNS = [
  */
 export function toAllocationError(err: unknown): Error {
   if (err instanceof NoDeviceAvailableError) return err;
+  // Client-side allocationTimeout expiry while the hub still queues the
+  // request: aborting the socket dropped the queue entry, and retrying later
+  // is exactly right.
+  if (err instanceof WebDriverError && err.error === 'timeout') {
+    return new NoDeviceAvailableError(err.message);
+  }
   const message = err instanceof Error ? err.message : String(err);
   if (RETRIABLE_PATTERNS.some((re) => re.test(message))) {
     return new NoDeviceAvailableError(message);

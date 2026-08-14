@@ -60,7 +60,7 @@ new TestingBotDriver({
   },
   key: '...',                 // default: TESTINGBOT_KEY env
   secret: '...',              // default: TESTINGBOT_SECRET env
-  allocationTimeout: 300_000, // ms to wait for a device
+  allocationTimeout: 395_000, // ms to wait for a device (the hub queues busy devices for up to 390s)
   idleTimeout: 230,           // seconds before TestingBot reaps an idle session
   maxDuration: 1800,          // max session length in seconds
   appiumVersion: 'latest',    // pin the Appium version TestingBot uses
@@ -72,7 +72,7 @@ new TestingBotDriver({
 });
 ```
 
-Device selection comes from your mobilewright project config: `platform`, `deviceType` (`real` | `simulator` | `emulator`), `deviceName` (regex), and `osVersion` (`"17"`, `">=17 <19"`). Ranges and regexes are resolved against TestingBot's live real-device list for real devices, and against the simulator/emulator catalog (`GET /v1/browsers`) for virtual ones — a virtual allocation pins the newest matching OS version.
+Device selection comes from your mobilewright project config: `platform`, `deviceType` (`real` | `simulator` | `emulator`), `deviceName` (regex), and `osVersion` (`"17"`, `">=17 <19"`). Ranges and regexes are resolved against TestingBot's physical-device catalog (`/v1/devices`) for real devices — idle devices are preferred, and if the chosen device is busy the hub queues the session until it frees up — and against the simulator/emulator catalog (`/v1/browsers`) for virtual ones, pinning the newest matching OS version.
 
 ## How it maps to TestingBot
 

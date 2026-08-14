@@ -1,10 +1,9 @@
-import { NoDeviceAvailableError, osVersionSatisfies, type AllocationCriteria, type DeviceInfo, type Platform } from '@mobilewright/protocol';
+import { osVersionSatisfies, type AllocationCriteria, type DeviceInfo, type Platform } from '@mobilewright/protocol';
 import type { PinnedDevice } from './capabilities.js';
 import type { BrowserEntry, RestApiClient, TestingBotDevice } from './rest-api.js';
 
-/** How long a fetched device list stays fresh. The device pool retries
- *  NoDeviceAvailableError in a loop; without this cache those retries would
- *  eat into TestingBot's REST rate limit (2000 requests / 5 min). */
+/** How long fetched device lists stay fresh — keeps a burst of pool-slot
+ *  allocations from hammering the REST API (2000 requests / 5 min limit). */
 const CACHE_TTL_MS = 10_000;
 
 /** The simulator/emulator combo list is near-static — cache it longer. */
@@ -12,7 +11,7 @@ const VIRTUAL_CACHE_TTL_MS = 300_000;
 
 export class DeviceCatalog {
   private readonly api: RestApiClient;
-  private cache: { devices: TestingBotDevice[]; fetchedAt: number } | undefined;
+  private cache: { all: TestingBotDevice[]; available: TestingBotDevice[]; fetchedAt: number } | undefined;
   private virtualCache: { entries: BrowserEntry[]; fetchedAt: number } | undefined;
 
   constructor(api: RestApiClient) {
@@ -21,23 +20,31 @@ export class DeviceCatalog {
 
   /**
    * Pick a concrete real device matching the criteria, for pinning into
-   * `appium:deviceName`/`appium:platformVersion`. Throws NoDeviceAvailableError
-   * when nothing currently matches (the pool treats that as "retry later").
+   * `appium:deviceName`/`appium:platformVersion`. Candidates come from the
+   * FULL physical-device catalog (GET /v1/devices) — a busy device is fine,
+   * because the hub queues POST /session until it frees up. Availability is
+   * only a preference, so allocations go to idle devices first. No match at
+   * all is a config error (plain Error — retrying would never help).
    * `pinCounts` refcounts device names pinned by this run's other slots; the
    * pick is registered in it synchronously (no await between choosing and
    * reserving), so concurrent allocates spread across devices instead of
    * racing for the same one. The caller decrements on release/failure.
    */
   async pickRealDevice(criteria: AllocationCriteria, pinCounts: Map<string, number>): Promise<PinnedDevice> {
-    const devices = await this.getAvailable();
-    const matching = devices.filter((d) => matches(d, criteria));
+    const { all, available } = await this.getPhysical();
+    const matching = all.filter((d) => matches(d, criteria));
     if (matching.length === 0) {
-      this.cache = undefined; // refetch on the pool's next retry
-      throw new NoDeviceAvailableError(
-        `No available TestingBot real device matches ${describeCriteria(criteria)}.`,
+      throw new Error(
+        `No TestingBot real device matches ${describeCriteria(criteria)}. ` +
+        'See https://testingbot.com/support/devices for available devices.',
       );
     }
-    const preferred = matching.find((d) => !pinCounts.has(d.name)) ?? matching[0]!;
+    const availableIds = new Set(available.map((d) => d.id));
+    const preferred =
+      matching.find((d) => availableIds.has(d.id) && !pinCounts.has(d.name)) ??
+      matching.find((d) => availableIds.has(d.id)) ??
+      matching.find((d) => !pinCounts.has(d.name)) ??
+      matching[0]!;
     pinCounts.set(preferred.name, (pinCounts.get(preferred.name) ?? 0) + 1);
     return { deviceName: preferred.name, platformVersion: String(preferred.version), real: true };
   }
@@ -82,10 +89,7 @@ export class DeviceCatalog {
 
   /** All physical devices mapped to the protocol's DeviceInfo shape. */
   async listDevices(platform?: Platform): Promise<DeviceInfo[]> {
-    const [all, available] = await Promise.all([
-      this.api.getDevices(false),
-      this.api.getDevices(true),
-    ]);
+    const { all, available } = await this.getPhysical();
     const availableIds = new Set(available.map((d) => d.id));
     return all
       .filter((d) => !platform || toPlatform(d) === platform)
@@ -100,14 +104,17 @@ export class DeviceCatalog {
       }));
   }
 
-  private async getAvailable(): Promise<TestingBotDevice[]> {
+  private async getPhysical(): Promise<{ all: TestingBotDevice[]; available: TestingBotDevice[] }> {
     const now = Date.now();
     if (this.cache && now - this.cache.fetchedAt < CACHE_TTL_MS) {
-      return this.cache.devices;
+      return this.cache;
     }
-    const devices = await this.api.getDevices(true);
-    this.cache = { devices, fetchedAt: now };
-    return devices;
+    const [all, available] = await Promise.all([
+      this.api.getDevices(false),
+      this.api.getDevices(true),
+    ]);
+    this.cache = { all, available, fetchedAt: now };
+    return this.cache;
   }
 
   private async getVirtual(): Promise<BrowserEntry[]> {

@@ -182,51 +182,36 @@ export class TestingBotDriver implements MobilewrightDriver {
       throw new NoDeviceAvailableError('allocation aborted before it started');
     }
 
-    // The abort signal must NOT cancel the HTTP request itself: the hub may
-    // already have created the session, and cancelling the fetch would lose
-    // the only copy of its id — an orphaned session billing until TestingBot's
-    // idle reaper finds it. Instead the request runs to completion (bounded by
-    // allocationTimeout) and an abort makes allocate() throw promptly while a
-    // background continuation deletes whatever the request eventually returns.
-    const request = this.hub.newSession(capabilities, { timeout: this.options.allocationTimeout });
-
+    // POST /session queues inside the hub until a matching device frees up
+    // (up to its 390s queue TTL). Aborting the socket is the correct way to
+    // give up: the hub's 'aborted' handler removes the pending queue entry,
+    // so nothing leaks. The one race — the response arriving just as the
+    // pool aborts — is handled by deleting the session that slipped through.
     let sessionId: string;
     let caps: Record<string, unknown>;
     try {
-      if (signal) {
-        let onAbort: (() => void) | undefined;
-        const abortedPromise = new Promise<'aborted'>((resolve) => {
-          onAbort = () => resolve('aborted');
-          signal.addEventListener('abort', onAbort, { once: true });
-        });
-        let outcome;
-        try {
-          outcome = await Promise.race([
-            request.then((r) => ({ r }), (err) => ({ err })),
-            abortedPromise,
-          ]);
-        } finally {
-          if (onAbort) signal.removeEventListener('abort', onAbort);
-        }
-        if (outcome === 'aborted') {
-          request.then(
-            ({ sessionId: lateId }) => {
-              debug('allocation resolved after abort, deleting late session %s', lateId);
-              return this.hub.deleteSession(lateId)
-                .catch(() => this.api.stopTest(lateId).catch(() => { }));
-            },
-            () => { /* request failed anyway — nothing to clean up */ },
-          );
+      const controller = new AbortController();
+      const onAbort = () => controller.abort();
+      signal?.addEventListener('abort', onAbort, { once: true });
+      try {
+        ({ sessionId, capabilities: caps } = await this.hub.newSession(capabilities, {
+          timeout: this.options.allocationTimeout,
+          signal: controller.signal,
+        }));
+      } catch (err) {
+        if (signal?.aborted) {
+          debug('allocation aborted while queued — hub dropped the pending request');
           throw new NoDeviceAvailableError('allocation aborted');
         }
-        if ('err' in outcome) throw toAllocationError(outcome.err);
-        ({ sessionId, capabilities: caps } = outcome.r);
-      } else {
-        try {
-          ({ sessionId, capabilities: caps } = await request);
-        } catch (err) {
-          throw toAllocationError(err);
-        }
+        throw toAllocationError(err);
+      } finally {
+        signal?.removeEventListener('abort', onAbort);
+      }
+      if (signal?.aborted) {
+        debug('allocation resolved as the pool aborted, deleting session %s', sessionId);
+        await this.hub.deleteSession(sessionId)
+          .catch(() => this.api.stopTest(sessionId).catch(() => { }));
+        throw new NoDeviceAvailableError('allocation aborted');
       }
     } catch (err) {
       if (reservedName) this.unpin(reservedName);
