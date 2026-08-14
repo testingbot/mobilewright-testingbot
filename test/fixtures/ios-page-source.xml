@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<AppiumAUT>
+  <XCUIElementTypeApplication type="XCUIElementTypeApplication" name="Milliways" label="Milliways" enabled="true" visible="true" x="0" y="0" width="393" height="852">
+    <XCUIElementTypeWindow type="XCUIElementTypeWindow" enabled="true" visible="true" x="0" y="0" width="393" height="852">
+      <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" value="Welcome to Milliways" name="welcome_title" label="Welcome to Milliways" enabled="true" visible="true" x="24" y="80" width="345" height="40" />
+      <XCUIElementTypeTextField type="XCUIElementTypeTextField" value="" name="name_input" label="Name field" placeholderValue="Your name" enabled="true" visible="true" x="24" y="140" width="345" height="44" />
+      <XCUIElementTypeButton type="XCUIElementTypeButton" name="order_button" label="Order" enabled="true" visible="true" x="130" y="210" width="133" height="50" />
+      <XCUIElementTypeSwitch type="XCUIElementTypeSwitch" value="1" name="towel_switch" label="Extra towel" enabled="true" visible="true" x="24" y="290" width="60" height="32" />
+      <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" value="Offscreen" name="offscreen" label="Offscreen" enabled="true" visible="false" x="0" y="900" width="100" height="20" />
+    </XCUIElementTypeWindow>
+  </XCUIElementTypeApplication>
+</AppiumAUT>

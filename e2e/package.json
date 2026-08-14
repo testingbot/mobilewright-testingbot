@@ -1,0 +1,13 @@
+{
+  "name": "mobilewright-testingbot-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "mobilewright test"
+  },
+  "dependencies": {
+    "@mobilewright/test": "^0.0.53",
+    "@testingbot/mobilewright-driver": "file:..",
+    "mobilewright": "^0.0.53"
+  }
+}

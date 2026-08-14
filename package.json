@@ -1,0 +1,57 @@
+{
+  "name": "@testingbot/mobilewright-driver",
+  "version": "0.1.0",
+  "description": "TestingBot driver for Mobilewright — run mobilewright tests on TestingBot's device cloud",
+  "homepage": "https://testingbot.com",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=18"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/testingbot/mobilewright-testingbot.git"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "mobilewright",
+    "testingbot",
+    "appium",
+    "webdriver",
+    "mobile",
+    "testing",
+    "ios",
+    "android"
+  ],
+  "peerDependencies": {
+    "@mobilewright/protocol": ">=0.0.53 <0.1.0"
+  },
+  "dependencies": {
+    "debug": "^4.4.0",
+    "fast-xml-parser": "^4.5.0"
+  },
+  "devDependencies": {
+    "@mobilewright/protocol": "0.0.53",
+    "@types/debug": "^4.1.12",
+    "@types/node": "^20.17.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}

@@ -1,0 +1,78 @@
+import { describe, expect, it } from 'vitest';
+import { appForCriteria, buildCapabilities } from '../../src/capabilities.js';
+import { resolveOptions } from '../../src/options.js';
+
+const options = resolveOptions({ key: 'k', secret: 's' });
+
+describe('buildCapabilities', () => {
+  it('requires a platform', () => {
+    expect(() => buildCapabilities({}, options)).toThrow(/requires a platform/);
+  });
+
+  it('builds android emulator caps by default', () => {
+    const caps = buildCapabilities({ platform: 'android' }, options, undefined, 'tb://app');
+    expect(caps.alwaysMatch).toMatchObject({
+      platformName: 'Android',
+      'appium:automationName': 'UiAutomator2',
+      'appium:deviceName': '*',
+    });
+    expect(caps.alwaysMatch['tb:options']).toMatchObject({
+      key: 'k',
+      secret: 's',
+      realDevice: false,
+      screenrecorder: true,
+      idletimeout: 230,
+    });
+  });
+
+  it('marks real devices and applies a pinned catalog device', () => {
+    const caps = buildCapabilities(
+      { platform: 'ios', deviceType: 'real', osVersion: '>=17' },
+      options,
+      { deviceName: 'iPhone 15', platformVersion: '17.4' },
+      'tb://app',
+    );
+    expect(caps.alwaysMatch).toMatchObject({
+      platformName: 'iOS',
+      'appium:automationName': 'XCUITest',
+      'appium:deviceName': 'iPhone 15',
+      'appium:platformVersion': '17.4',
+    });
+    expect((caps.alwaysMatch['tb:options'] as Record<string, unknown>)['realDevice']).toBe(true);
+  });
+
+  it('forwards plain osVersion for virtual devices but rejects ranges', () => {
+    const caps = buildCapabilities({ platform: 'ios', deviceType: 'simulator', osVersion: '17.0' }, options, undefined, 'tb://app');
+    expect(caps.alwaysMatch['appium:platformVersion']).toBe('17.0');
+    expect(caps.alwaysMatch['appium:app']).toBe('tb://app');
+    expect(() =>
+      buildCapabilities({ platform: 'ios', deviceType: 'simulator', osVersion: '>=17 <19' }, options, undefined, 'tb://app'),
+    ).toThrow(/cannot resolve the osVersion range/);
+  });
+
+  it('requires an app (or browser) to start the session', () => {
+    expect(() => buildCapabilities({ platform: 'android' }, options)).toThrow(/must start with an app/);
+    // browserName via the escape hatch also satisfies the requirement
+    const withBrowser = resolveOptions({ key: 'k', secret: 's', capabilities: { browserName: 'chrome' } });
+    expect(() => buildCapabilities({ platform: 'android' }, withBrowser)).not.toThrow();
+  });
+
+  it('appForCriteria picks the most specific slot', () => {
+    const apps = { ios: './generic.ipa', 'ios-simulator': './sim.zip', android: './app.apk' } as const;
+    expect(appForCriteria({ platform: 'ios', deviceType: 'simulator' }, apps)).toBe('./sim.zip');
+    expect(appForCriteria({ platform: 'ios', deviceType: 'real' }, apps)).toBe('./generic.ipa');
+    expect(appForCriteria({ platform: 'android', deviceType: 'emulator' }, apps)).toBe('./app.apk');
+    expect(appForCriteria({ platform: 'android' }, {})).toBeUndefined();
+  });
+
+  it('merges user capabilities and tbOptions last as an escape hatch', () => {
+    const custom = resolveOptions({
+      key: 'k', secret: 's',
+      capabilities: { 'appium:autoGrantPermissions': true },
+      tbOptions: { timeZone: 'Europe/Brussels', idletimeout: 500 },
+    });
+    const caps = buildCapabilities({ platform: 'android' }, custom, undefined, 'tb://app');
+    expect(caps.alwaysMatch['appium:autoGrantPermissions']).toBe(true);
+    expect(caps.alwaysMatch['tb:options']).toMatchObject({ timeZone: 'Europe/Brussels', idletimeout: 500 });
+  });
+});

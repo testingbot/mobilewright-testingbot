@@ -1,0 +1,169 @@
+import { writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { NoDeviceAvailableError } from '@mobilewright/protocol';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { TestingBotDriver } from '../../src/driver.js';
+import { FakeHub } from '../fake-hub/fake-hub.js';
+
+/**
+ * Exercises the driver through the same sequence mobilewright's device pool
+ * performs: the coordinator's driver instance allocates and releases, a
+ * separately constructed instance (the worker process re-imports the config)
+ * connects by session id, disconnect is a soft detach so the pool can
+ * re-grant the slot, and release actually ends the TestingBot session.
+ */
+describe('pool lifecycle against FakeHub', () => {
+  let hub: FakeHub;
+  let coordinator: TestingBotDriver;
+
+  const driverOptions = () => ({
+    key: 'k',
+    secret: 's',
+    hubUrl: hub.hubUrl,
+    apiUrl: hub.apiUrl,
+    allocationTimeout: 5_000,
+    commandTimeout: 2_000,
+    // TestingBot sessions must start with an app; tb:// URLs skip the upload.
+    apps: { ios: 'tb://prebuilt-ios', android: 'tb://prebuilt-android' } as const,
+  });
+
+  beforeEach(async () => {
+    hub = new FakeHub();
+    await hub.start();
+    coordinator = new TestingBotDriver(driverOptions());
+  });
+
+  afterEach(async () => {
+    await coordinator.dispose();
+    await hub.stop();
+  });
+
+  it('allocate → connect (second instance) → act → disconnect → reuse → release', async () => {
+    await coordinator.prepare();
+    const allocated = await coordinator.allocate({ platform: 'ios', deviceType: 'simulator' }, new Set());
+    expect(allocated.driver).toBe('testingbot');
+    expect(hub.liveSessions()).toHaveLength(1);
+
+    // Worker 1 connects by session UUID over stateless HTTP.
+    const worker = new TestingBotDriver(driverOptions());
+    const session = await worker.connect({ platform: 'ios', deviceId: allocated.deviceId });
+    expect(session.deviceId).toBe(allocated.deviceId);
+
+    const nodes = await worker.getViewHierarchy();
+    expect(nodes.length).toBeGreaterThan(0);
+    await worker.tap(100, 200);
+    const screen = await worker.getScreenSize();
+    expect(screen).toMatchObject({ width: 393, height: 852 });
+
+    // Soft detach: the TestingBot session must survive for the next test.
+    await worker.disconnect();
+    expect(hub.liveSessions()).toHaveLength(1);
+
+    // The pool re-grants the same slot to another worker without re-allocating.
+    const worker2 = new TestingBotDriver(driverOptions());
+    await worker2.connect({ platform: 'ios', deviceId: allocated.deviceId });
+    await worker2.disconnect();
+
+    await coordinator.release(allocated.deviceId);
+    expect(hub.liveSessions()).toHaveLength(0);
+  });
+
+  it('session methods before connect() fail with a clear error', async () => {
+    const worker = new TestingBotDriver(driverOptions());
+    await expect(worker.tap(1, 1)).rejects.toThrow('No active session. Call connect() first.');
+  });
+
+  it('maps hub "busy" errors to NoDeviceAvailableError so the pool re-queues', async () => {
+    hub.busyCount = 1;
+    await expect(
+      coordinator.allocate({ platform: 'android' }, new Set()),
+    ).rejects.toBeInstanceOf(NoDeviceAvailableError);
+    // Next attempt (the pool's retry) succeeds.
+    const allocated = await coordinator.allocate({ platform: 'android' }, new Set());
+    expect(hub.liveSessions()).toHaveLength(1);
+    await coordinator.release(allocated.deviceId);
+  });
+
+  it('pins a concrete catalog device for real-device criteria', async () => {
+    const allocated = await coordinator.allocate(
+      { platform: 'android', deviceType: 'real', osVersion: '>=14' },
+      new Set(),
+    );
+    const session = hub.liveSessions()[0]!;
+    expect(session.capabilities['appium:deviceName']).toBe('Pixel 8');
+    expect(session.capabilities['appium:platformVersion']).toBe('14');
+    expect((session.capabilities['tb:options'] as Record<string, unknown>)['realDevice']).toBe(true);
+    expect(allocated.model).toBe('Pixel 8');
+    await coordinator.release(allocated.deviceId);
+  });
+
+  it('deletes a session that resolves after the pool aborted the waiter', async () => {
+    hub.allocationDelay = 150;
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 30);
+    await expect(
+      coordinator.allocate({ platform: 'ios' }, new Set(), controller.signal),
+    ).rejects.toThrow();
+    // Whether fetch aborted in-flight or the session was deleted post-resolve,
+    // nothing may stay allocated (billing + the pool's release-not-publish rule).
+    await new Promise((r) => setTimeout(r, 300));
+    expect(hub.liveSessions()).toHaveLength(0);
+  });
+
+  it('dispose sweeps leftover sessions', async () => {
+    await coordinator.allocate({ platform: 'ios' }, new Set());
+    await coordinator.allocate({ platform: 'ios' }, new Set());
+    expect(hub.liveSessions()).toHaveLength(2);
+    await coordinator.dispose();
+    expect(hub.liveSessions()).toHaveLength(0);
+  });
+
+  it('uploads a local app at allocation and treats installApp as already satisfied', async () => {
+    const apkPath = join(tmpdir(), 'fake-app.apk');
+    writeFileSync(apkPath, Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.from('apk-bytes')]));
+    const driver = new TestingBotDriver({ ...driverOptions(), apps: { android: apkPath } });
+
+    const allocated = await driver.allocate({ platform: 'android', deviceType: 'emulator' }, new Set());
+    expect(hub.uploadCount).toBe(1);
+    expect(hub.liveSessions()[0]!.capabilities['appium:app']).toBe('tb://fakeapp');
+
+    const worker = new TestingBotDriver({ ...driverOptions(), apps: { android: apkPath } });
+    await worker.connect({ platform: 'android', deviceId: allocated.deviceId, deviceType: 'emulator' });
+    // Same build as declared: no-op instead of a mid-session install.
+    await expect(worker.installApp(apkPath)).resolves.toBeUndefined();
+    // A different binary cannot be installed mid-session on TestingBot.
+    const otherPath = join(tmpdir(), 'other-app.apk');
+    writeFileSync(otherPath, Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.from('different')]));
+    await expect(worker.installApp(otherPath)).rejects.toThrow(/cannot install .* mid-session/);
+
+    await driver.release(allocated.deviceId);
+    await driver.dispose();
+  });
+
+  it('rejects allocation without a configured app', async () => {
+    const driver = new TestingBotDriver({ ...driverOptions(), apps: {} });
+    await expect(driver.allocate({ platform: 'ios' }, new Set())).rejects.toThrow(/must start with an app/);
+    await driver.dispose();
+  });
+
+  it('observer reports the run verdict to every session, even after release', async () => {
+    const a = await coordinator.allocate({ platform: 'ios' }, new Set());
+    const b = await coordinator.allocate({ platform: 'ios' }, new Set());
+    // Playwright teardown ordering: the pool releases every session (and
+    // dispose runs) BEFORE the reporter delivers onRunEnd. Reports must
+    // still reach both sessions.
+    await coordinator.release(a.deviceId);
+    await coordinator.dispose();
+    coordinator.observer!.onRunStart?.({ totalTests: 3 });
+    coordinator.observer!.onTestEnd?.(
+      { id: 't1', title: 'boarding', titlePath: ['', 'ios', 'f', 'boarding'] },
+      { status: 'failed', retry: 0, duration: 5, errors: ['Error: no towel'], steps: [] },
+    );
+    await coordinator.observer!.onRunEnd?.({ status: 'failed', startTime: new Date(0), duration: 10 });
+
+    expect(hub.testUpdates.get(a.deviceId)).toMatchObject({ 'test[success]': '0' });
+    expect(hub.testUpdates.get(b.deviceId)).toMatchObject({ 'test[success]': '0' });
+    expect(String(hub.testUpdates.get(a.deviceId)!['test[status_message]'])).toContain('boarding');
+  });
+});

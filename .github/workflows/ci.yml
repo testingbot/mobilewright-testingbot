@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Pin the floor version and track upstream drift with latest.
+        mobilewright-protocol: ['0.0.53', 'latest']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm install --no-save "@mobilewright/protocol@${{ matrix.mobilewright-protocol }}"
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
