@@ -139,6 +139,16 @@ export class FakeHub {
 
     // ─── REST API ─────────────────────────────────────────────────
     if (path === '/v1/user') return rest({ first_name: 'Zaphod' });
+    if (path === '/v1/browsers') {
+      return rest([
+        { name: 'chrome', platformName: 'Android', deviceName: 'Pixel 9', version: '16.0' },
+        { name: 'chrome', platformName: 'Android', deviceName: 'Galaxy S23', version: '14.0' },
+        { name: 'chrome', platformName: 'Android', deviceName: 'ChromeOS Large', version: '16.0' },
+        { name: 'safari', platformName: 'iOS', deviceName: 'iPhone 15', version: '17.5' },
+        { name: 'safari', platformName: 'iOS', deviceName: 'iPhone 14', version: '16.4' },
+        { name: 'safari', platform: 'SEQUOIA', version: '18.0' },
+      ]);
+    }
     if (method === 'POST' && path === '/v1/storage') {
       this.uploadCount += 1;
       return rest({ app_url: 'tb://fakeapp' }, 201);

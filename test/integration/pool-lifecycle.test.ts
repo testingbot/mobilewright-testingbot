@@ -98,6 +98,18 @@ describe('pool lifecycle against FakeHub', () => {
     await coordinator.release(allocated.deviceId);
   });
 
+  it('pins a concrete simulator for virtual osVersion ranges via /v1/browsers', async () => {
+    const allocated = await coordinator.allocate(
+      { platform: 'ios', deviceType: 'simulator', osVersion: '>=16 <18' },
+      new Set(),
+    );
+    const session = hub.liveSessions()[0]!;
+    expect(session.capabilities['appium:deviceName']).toBe('iPhone 15');
+    expect(session.capabilities['appium:platformVersion']).toBe('17.5');
+    expect((session.capabilities['tb:options'] as Record<string, unknown>)['realDevice']).toBe(false);
+    await coordinator.release(allocated.deviceId);
+  });
+
   it('deletes a session that resolves after the pool aborted the waiter', async () => {
     hub.allocationDelay = 150;
     const controller = new AbortController();

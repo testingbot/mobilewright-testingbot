@@ -6,10 +6,12 @@ export interface W3CCapabilities {
   firstMatch: Record<string, unknown>[];
 }
 
-/** A concrete device pinned from the catalog (real devices). */
+/** A concrete device pinned from a catalog lookup. */
 export interface PinnedDevice {
   deviceName: string;
   platformVersion: string;
+  /** True when the pin came from the physical-device catalog. */
+  real?: boolean;
 }
 
 /** Characters that make a regex source mean something beyond its literal text. */
@@ -53,9 +55,9 @@ export function buildCapabilities(
     );
   }
 
-  // A device pinned via criteria.deviceId comes from TestingBot's physical
-  // device catalog, so a pin implies a real device even without deviceType.
-  const isReal = criteria.deviceType === 'real' || (pinned !== undefined && criteria.deviceType === undefined);
+  // A pin from the physical-device catalog (deviceId lookups) implies a real
+  // device even without deviceType; virtual-catalog pins never do.
+  const isReal = criteria.deviceType === 'real' || (criteria.deviceType === undefined && pinned?.real === true);
   const caps: Record<string, unknown> = {
     platformName: platform === 'ios' ? 'iOS' : 'Android',
     'appium:automationName': platform === 'ios' ? 'XCUITest' : 'UiAutomator2',
@@ -83,8 +85,9 @@ export function buildCapabilities(
     caps['appium:deviceName'] = pinned.deviceName;
     caps['appium:platformVersion'] = pinned.platformVersion;
   } else {
-    // deviceNamePattern is a regex source; TestingBot's simulator/emulator
-    // name matching is not regex-based, so only literal names pass through.
+    // Fallback guard: the driver resolves regex patterns via the virtual
+    // catalog before calling this, so a regex here means a direct call
+    // without resolution — only literal names can pass through to the hub.
     if (criteria.deviceNamePattern && REGEX_METACHARS.test(criteria.deviceNamePattern)) {
       throw new Error(
         `TestingBotDriver cannot resolve the deviceName pattern /${criteria.deviceNamePattern}/ for ` +
@@ -94,13 +97,13 @@ export function buildCapabilities(
     }
     caps['appium:deviceName'] = criteria.deviceNamePattern ?? '*';
     if (criteria.osVersion) {
-      // Virtual devices: only plain versions/prefixes can be forwarded as
-      // platformVersion. Range expressions need catalog resolution, which the
-      // MVP only implements for real devices.
+      // Fallback guard: range expressions need catalog resolution (the
+      // driver does this before calling); only plain versions/prefixes can
+      // be forwarded as platformVersion.
       if (/[<>=\s~^]/.test(criteria.osVersion)) {
         throw new Error(
           `TestingBotDriver cannot resolve the osVersion range "${criteria.osVersion}" for ` +
-          'simulators/emulators yet. Use an exact version (e.g. "17.0") or a prefix (e.g. "17").',
+          'simulators/emulators without catalog resolution. Use an exact version (e.g. "17.0") or a prefix (e.g. "17").',
         );
       }
       caps['appium:platformVersion'] = criteria.osVersion;

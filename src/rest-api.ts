@@ -16,6 +16,15 @@ export interface TestingBotDevice {
   available?: boolean;
 }
 
+/** One row of GET /v1/browsers — for mobile rows, a virtual device+OS combo. */
+export interface BrowserEntry {
+  name?: string;
+  platform?: string;
+  platformName?: string; // "iOS" | "Android" for mobile rows
+  deviceName?: string;
+  version?: string | number; // OS version for mobile rows
+}
+
 export interface StorageEntry {
   app_url: string; // "tb://<appkey>"
   state?: 'PROCESSING' | 'DONE';
@@ -65,6 +74,13 @@ export class RestApiClient {
     if (Array.isArray(result)) return result as TestingBotDevice[];
     const wrapped = (result as { devices?: TestingBotDevice[] }).devices;
     return wrapped ?? [];
+  }
+
+  /** Simulator/emulator (and desktop-browser) combos; mobile rows carry platformName + deviceName + OS version. */
+  async getBrowsers(): Promise<BrowserEntry[]> {
+    const result = await this.request('GET', '/browsers');
+    if (Array.isArray(result)) return result as BrowserEntry[];
+    return ((result as { browsers?: BrowserEntry[] }).browsers) ?? [];
   }
 
   async getDevice(id: string | number): Promise<TestingBotDevice> {

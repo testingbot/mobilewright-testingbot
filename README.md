@@ -72,7 +72,7 @@ new TestingBotDriver({
 });
 ```
 
-Device selection comes from your mobilewright project config: `platform`, `deviceType` (`real` | `simulator` | `emulator`), `deviceName` (regex), and `osVersion` (`"17"`, `">=17 <19"` — ranges are resolved against TestingBot's live real-device list).
+Device selection comes from your mobilewright project config: `platform`, `deviceType` (`real` | `simulator` | `emulator`), `deviceName` (regex), and `osVersion` (`"17"`, `">=17 <19"`). Ranges and regexes are resolved against TestingBot's live real-device list for real devices, and against the simulator/emulator catalog (`GET /v1/browsers`) for virtual ones — a virtual allocation pins the newest matching OS version.
 
 ## How it maps to TestingBot
 
@@ -88,10 +88,9 @@ Device selection comes from your mobilewright project config: `platform`, `devic
 ## Current limitations
 
 - One TestingBot session can host several mobilewright tests (the pool reuses device slots); pass/fail is reported per session as the run-level verdict.
-- `osVersion` ranges and `deviceName` regexes are resolved for **real devices** only; simulators/emulators need an exact version or prefix (`"17"`) and a literal device name.
 - Modifier key chords (`pressKeys(['ctrl+a'])`) work on Android only — XCUITest cannot hold modifier keys; on iOS, `clearText()` deletes the focused field with backspaces instead.
 - `pressButton` on iOS supports `HOME`, `VOLUME_UP`, `VOLUME_DOWN`; `listApps()` reports the foreground app only.
-- Screenshots are always PNG; webviews (`webViewBridge`) and `applyDeviceSettings` are not implemented yet.
+- Screenshots are always PNG; webviews (`webViewBridge`) are not implemented yet. `applyDeviceSettings` turns Android animations off best-effort via `mobile: shell` (a no-op on iOS, and silently skipped when the shell feature is unavailable).
 - Real iOS devices need a signed `.ipa`; simulator builds (`.zip`/`.app`) are rejected on real devices with a clear error.
 - The app comes from the driver's `apps` option, installed at session start. A mobilewright `installApps` entry pointing at the same build is verified and skipped; a different binary raises an error (TestingBot supports no mid-session installs).
 - `stopRecording()` returns the TestingBot video URL (the file finalizes after the session ends); it does not write a local file.

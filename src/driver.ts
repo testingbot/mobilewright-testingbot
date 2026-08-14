@@ -7,6 +7,7 @@ import {
   type AppInfo,
   type ConnectionConfig,
   type DeviceInfo,
+  type DeviceSettings,
   type DeviceType,
   type GestureSequence,
   type HardwareButton,
@@ -157,6 +158,11 @@ export class TestingBotDriver implements MobilewrightDriver {
       // each other's picks and spread across devices.
       pinned = await this.catalog.pickRealDevice(criteria, this.pinCounts);
       reservedName = pinned.deviceName;
+    } else if (criteria.osVersion || criteria.deviceNamePattern) {
+      // Virtual devices: resolve osVersion ranges and deviceName regexes
+      // against the simulator/emulator catalog (GET /v1/browsers) — the hub's
+      // own name matching is not regex-based for virtual devices.
+      pinned = await this.catalog.pickVirtualDevice(criteria);
     }
 
     // TestingBot sessions must start with an app — resolve and upload the
@@ -299,6 +305,31 @@ export class TestingBotDriver implements MobilewrightDriver {
     // Soft detach only: the pool re-grants this slot to the next test and
     // ends the session via release().
     this.active = undefined;
+  }
+
+  // ─── MobilewrightSession: device settings ──────────────────────
+
+  /**
+   * Best-effort, fire-and-forget per the protocol: Android animation scales
+   * via `mobile: shell` (may be unavailable depending on TestingBot's Appium
+   * feature flags — failures are logged, never thrown); iOS has no equivalent.
+   */
+  async applyDeviceSettings(settings: DeviceSettings): Promise<void> {
+    const { sessionId, platform } = this.session();
+    if (platform !== 'android' || settings.animations === undefined) return;
+    const value = settings.animations === 'off' ? '0' : '1';
+    for (const key of ['window_animation_scale', 'transition_animation_scale', 'animator_duration_scale']) {
+      try {
+        await this.hub.execute(sessionId, 'mobile: shell', [{
+          command: 'settings',
+          args: ['put', 'global', key, value],
+        }]);
+      } catch (err) {
+        debug('applyDeviceSettings: could not set %s (%s)', key, err);
+        return; // same failure for the remaining keys — stop early
+      }
+    }
+    debug('animations turned %s', settings.animations);
   }
 
   // ─── MobilewrightSession: UI hierarchy ─────────────────────────
