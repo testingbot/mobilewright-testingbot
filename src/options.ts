@@ -51,6 +51,40 @@ export interface TestingBotDriverOptions {
   name?: string;
   /** Build name for grouping sessions on the dashboard (`tb:options.build`). */
   build?: string;
+  /** Device timezone (tz database name, e.g. "Europe/Brussels"). Default: "Etc/UTC". */
+  timeZone?: string;
+  /** Route device traffic through a proxy in this country ("DE", "US", "*" = random). */
+  geoCountryCode?: string;
+  /** Simulate network conditions: a preset ("Edge", "3G", "4G", "airplane") or custom speeds. */
+  throttleNetwork?: string | { downloadSpeed: number; uploadSpeed: number; latency: number; loss: number };
+  /** Capture a screenshot at every test step. Default: false. */
+  screenshots?: boolean;
+  /** Record a video of each session. Default: true. */
+  video?: boolean;
+  /** Command-log capture: true, false, or 'strip-parameters' (redacts request params). */
+  recordLogs?: boolean | 'strip-parameters';
+  /** Make test results publicly accessible. Default: false. */
+  public?: boolean;
+  /** Custom metadata (release, commit hash, ...) shown on the test detail page. */
+  extra?: string;
+  /** Restrict allocation to tablets only. */
+  tabletOnly?: boolean;
+  /** Restrict allocation to phones only. */
+  phoneOnly?: boolean;
+  /**
+   * Route sessions through a running TestingBot Tunnel with this identifier
+   * (`tb:options.tunnelIdentifier`). Start the tunnel yourself, or use the
+   * `tunnel` option to have the driver manage one.
+   */
+  tunnelIdentifier?: string;
+  /**
+   * Have the driver start a TestingBot Tunnel before the run and stop it
+   * afterwards, so tests can reach localhost/staging servers. Requires the
+   * optional `testingbot-tunnel-launcher` package (and Java) on the machine.
+   * Pass `true`, or an object with a tunnel `identifier` and any other
+   * testingbot-tunnel-launcher options.
+   */
+  tunnel?: boolean | ({ identifier?: string } & Record<string, unknown>);
   /** Extra W3C/Appium capabilities, merged last (escape hatch). */
   capabilities?: Record<string, unknown>;
   /** Extra `tb:options` entries, merged last (escape hatch). */
@@ -79,6 +113,18 @@ export interface ResolvedOptions {
   appiumVersion: string | undefined;
   name: string | undefined;
   build: string | undefined;
+  timeZone: string | undefined;
+  geoCountryCode: string | undefined;
+  throttleNetwork: string | { downloadSpeed: number; uploadSpeed: number; latency: number; loss: number } | undefined;
+  screenshots: boolean | undefined;
+  video: boolean;
+  recordLogs: boolean | 'strip-parameters' | undefined;
+  public: boolean | undefined;
+  extra: string | undefined;
+  tabletOnly: boolean | undefined;
+  phoneOnly: boolean | undefined;
+  tunnelIdentifier: string | undefined;
+  tunnel: false | ({ identifier?: string } & Record<string, unknown>);
   capabilities: Record<string, unknown>;
   tbOptions: Record<string, unknown>;
   testResults: 'on' | 'off';
@@ -106,6 +152,18 @@ export function resolveOptions(options: TestingBotDriverOptions = {}): ResolvedO
     appiumVersion: options.appiumVersion,
     name: options.name,
     build: options.build,
+    timeZone: options.timeZone,
+    geoCountryCode: options.geoCountryCode,
+    throttleNetwork: options.throttleNetwork,
+    screenshots: options.screenshots,
+    video: options.video ?? true,
+    recordLogs: options.recordLogs,
+    public: options.public,
+    extra: options.extra,
+    tabletOnly: options.tabletOnly,
+    phoneOnly: options.phoneOnly,
+    tunnelIdentifier: options.tunnelIdentifier ?? (typeof options.tunnel === 'object' ? options.tunnel.identifier : undefined),
+    tunnel: options.tunnel === true ? {} : (options.tunnel || false),
     capabilities: options.capabilities ?? {},
     tbOptions: options.tbOptions ?? {},
     testResults: options.testResults ?? 'on',

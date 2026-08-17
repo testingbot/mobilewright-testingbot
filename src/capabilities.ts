@@ -114,11 +114,21 @@ export function buildCapabilities(
     key: options.key,
     secret: options.secret,
     realDevice: isReal,
-    screenrecorder: true,
+    screenrecorder: options.video,
     idletimeout: options.idleTimeout,
   };
   if (options.maxDuration !== undefined) tbOptions['maxduration'] = options.maxDuration;
   if (options.appiumVersion !== undefined) tbOptions['appiumVersion'] = options.appiumVersion;
+  if (options.timeZone !== undefined) tbOptions['timeZone'] = options.timeZone;
+  if (options.geoCountryCode !== undefined) tbOptions['testingbot.geoCountryCode'] = options.geoCountryCode;
+  if (options.throttleNetwork !== undefined) tbOptions['throttle_network'] = options.throttleNetwork;
+  if (options.screenshots !== undefined) tbOptions['screenshot'] = options.screenshots;
+  if (options.recordLogs !== undefined) tbOptions['recordLogs'] = String(options.recordLogs);
+  if (options.public !== undefined) tbOptions['public'] = options.public;
+  if (options.extra !== undefined) tbOptions['extra'] = options.extra;
+  if (options.tabletOnly !== undefined) tbOptions['tabletOnly'] = options.tabletOnly;
+  if (options.phoneOnly !== undefined) tbOptions['phoneOnly'] = options.phoneOnly;
+  if (options.tunnelIdentifier !== undefined) tbOptions['tunnelIdentifier'] = options.tunnelIdentifier;
   // Always name the session so it never shows as unnamed on the dashboard;
   // the observer renames per-test sessions to their test's title at run end.
   tbOptions['name'] = options.name ?? 'mobilewright';

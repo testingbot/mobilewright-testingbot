@@ -76,4 +76,42 @@ describe('buildCapabilities', () => {
     expect(caps.alwaysMatch['appium:autoGrantPermissions']).toBe(true);
     expect(caps.alwaysMatch['tb:options']).toMatchObject({ timeZone: 'Europe/Brussels', idletimeout: 500 });
   });
+
+  it('maps the typed TestingBot options into tb:options', () => {
+    const opts = resolveOptions({
+      key: 'k', secret: 's',
+      timeZone: 'Europe/Brussels',
+      geoCountryCode: 'DE',
+      throttleNetwork: '3G',
+      screenshots: true,
+      video: false,
+      recordLogs: 'strip-parameters',
+      public: true,
+      extra: 'commit=abc123',
+      phoneOnly: true,
+      tunnelIdentifier: 'ci-42',
+    });
+    const caps = buildCapabilities({ platform: 'android' }, opts, undefined, 'tb://app');
+    expect(caps.alwaysMatch['tb:options']).toMatchObject({
+      timeZone: 'Europe/Brussels',
+      'testingbot.geoCountryCode': 'DE',
+      throttle_network: '3G',
+      screenshot: true,
+      screenrecorder: false,
+      recordLogs: 'strip-parameters',
+      public: true,
+      extra: 'commit=abc123',
+      phoneOnly: true,
+      tunnelIdentifier: 'ci-42',
+    });
+  });
+
+  it('derives tunnelIdentifier from the tunnel object', () => {
+    const opts = resolveOptions({ key: 'k', secret: 's', tunnel: { identifier: 'local-1' } });
+    expect(opts.tunnelIdentifier).toBe('local-1');
+    expect(opts.tunnel).toEqual({ identifier: 'local-1' });
+    const plain = resolveOptions({ key: 'k', secret: 's', tunnel: true });
+    expect(plain.tunnel).toEqual({});
+    expect(plain.tunnelIdentifier).toBeUndefined();
+  });
 });

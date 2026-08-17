@@ -68,10 +68,43 @@ new TestingBotDriver({
   build: 'ci-1234',           // build grouping on the dashboard
   testResults: 'on',          // 'off' disables pass/fail reporting
   sessionPerTest: false,      // true = fresh TestingBot session (and video) per test
+
+  timeZone: 'Europe/Brussels',   // device timezone (tz database name)
+  geoCountryCode: 'DE',          // route device traffic via a proxy in this country
+  throttleNetwork: '3G',         // or { downloadSpeed, uploadSpeed, latency, loss }
+  screenshots: true,             // screenshot at every step (default false)
+  video: true,                   // session video (default true)
+  recordLogs: 'strip-parameters',// command logs: true | false | 'strip-parameters'
+  public: false,                 // make results publicly accessible
+  extra: 'commit=abc123',        // custom metadata on the test detail page
+  tabletOnly: false,             // restrict allocation to tablets
+  phoneOnly: false,              // ...or to phones
+
   capabilities: {},           // extra Appium capabilities (escape hatch)
   tbOptions: {},              // extra tb:options entries (escape hatch)
 });
 ```
+
+## Testing localhost / staging servers (TestingBot Tunnel)
+
+To let devices reach servers behind your firewall, either start a
+[TestingBot Tunnel](https://testingbot.com/support/tunnel) yourself and pass
+its identifier:
+
+```ts
+driver: new TestingBotDriver({ tunnelIdentifier: 'my-tunnel' })
+```
+
+or let the driver manage the tunnel around the run (requires Java and the
+optional launcher package — `npm install --save-dev testingbot-tunnel-launcher`):
+
+```ts
+driver: new TestingBotDriver({ tunnel: true })                        // anonymous tunnel
+driver: new TestingBotDriver({ tunnel: { identifier: 'ci-42' } })     // named tunnel
+```
+
+The driver starts the tunnel in `prepare()` (before any device is allocated)
+and closes it in `dispose()` after the run.
 
 Device selection comes from your mobilewright project config: `platform`, `deviceType` (`real` | `simulator` | `emulator`), `deviceName` (regex), and `osVersion` (`"17"`, `">=17 <19"`). Ranges and regexes are resolved against TestingBot's physical-device catalog (`/v1/devices`) for real devices — idle devices are preferred, and if the chosen device is busy the hub queues the session until it frees up — and against the simulator/emulator catalog (`/v1/browsers`) for virtual ones, pinning the newest matching OS version.
 

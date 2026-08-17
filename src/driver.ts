@@ -43,6 +43,7 @@ import { TestingBotTestObserver } from './observer.js';
 import { requireCredentials, resolveOptions, type ResolvedOptions, type TestingBotDriverOptions } from './options.js';
 import { RestApiClient } from './rest-api.js';
 import { RunLog } from './run-log.js';
+import { TunnelManager } from './tunnel.js';
 import { WebDriverClient } from './webdriver-client.js';
 
 const debug = createDebug('testingbot:driver');
@@ -107,6 +108,7 @@ export class TestingBotDriver implements MobilewrightDriver {
   private readonly storage: AppStorage;
   private readonly keepalive: Keepalive;
   private readonly runLog: RunLog;
+  private readonly tunnel = new TunnelManager();
 
   /** Sessions created by this instance's allocate() (coordinator process). */
   private readonly allocated = new Map<string, AllocatedSession>();
@@ -154,6 +156,7 @@ export class TestingBotDriver implements MobilewrightDriver {
     this.runLog.truncate(); // drop session/app records from any previous run
     await this.api.getUser();
     debug('credentials verified against %s', this.options.apiUrl);
+    await this.tunnel.start(this.options);
   }
 
   async allocate(
@@ -289,6 +292,7 @@ export class TestingBotDriver implements MobilewrightDriver {
       this.hub.deleteSession(id).catch(() => this.api.stopTest(id).catch(() => { })),
     ));
     if (leftover.length) debug('disposed %d leftover session(s)', leftover.length);
+    await this.tunnel.stop();
   }
 
   // ─── MobilewrightSession: connection ───────────────────────────
