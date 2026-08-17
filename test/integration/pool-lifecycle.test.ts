@@ -281,4 +281,25 @@ describe('sessionPerTest against FakeHub', () => {
     expect(readFileSync(output, 'utf-8')).toContain('fake-mp4-bytes-for-');
     await coordinator.dispose();
   });
+
+  it('webViewBridge lists, drives, and detaches from webviews', async () => {
+    const coordinator = new TestingBotDriver(options());
+    const allocated = await coordinator.allocate({ platform: 'ios', deviceType: 'simulator' }, new Set());
+    const worker = new TestingBotDriver(options());
+    await worker.connect({ platform: 'ios', deviceId: allocated.deviceId, deviceType: 'simulator' });
+
+    const webviews = await worker.webViewBridge.listWebViews();
+    expect(webviews).toEqual([{ id: 'WEBVIEW_com.example', title: 'Checkout', url: 'https://shop.example/cart' }]);
+
+    const view = await worker.webViewBridge.attachWebView('WEBVIEW_com.example');
+    expect(hub.liveSessions()[0]!.context).toBe('WEBVIEW_com.example');
+    expect(await view.url()).toBe('https://shop.example/cart');
+    expect(await view.title()).toBe('Checkout');
+    await view.waitForLoadState();
+    await view.close();
+    expect(hub.liveSessions()[0]!.context).toBe('NATIVE_APP');
+
+    await worker.disconnect();
+    await coordinator.dispose();
+  });
 });

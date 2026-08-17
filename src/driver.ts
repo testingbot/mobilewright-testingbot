@@ -44,6 +44,7 @@ import { requireCredentials, resolveOptions, type ResolvedOptions, type TestingB
 import { RestApiClient } from './rest-api.js';
 import { RunLog } from './run-log.js';
 import { TunnelManager } from './tunnel.js';
+import { AppiumWebViewBridge } from './webview.js';
 import { WebDriverClient } from './webdriver-client.js';
 
 const debug = createDebug('testingbot:driver');
@@ -100,6 +101,8 @@ const IOS_BUTTON_NAMES: Partial<Record<HardwareButton, string>> = {
  */
 export class TestingBotDriver implements MobilewrightDriver {
   readonly observer: TestObserver | undefined;
+  /** WebView support via Appium contexts (its presence signals capability). */
+  readonly webViewBridge: AppiumWebViewBridge;
 
   private readonly options: ResolvedOptions;
   private readonly hub: WebDriverClient;
@@ -132,6 +135,7 @@ export class TestingBotDriver implements MobilewrightDriver {
     this.storage = new AppStorage(this.api);
     this.keepalive = new Keepalive(this.hub);
     this.runLog = new RunLog();
+    this.webViewBridge = new AppiumWebViewBridge(this.hub, () => this.session().sessionId);
     this.observer = this.options.testResults === 'off'
       ? undefined
       : new TestingBotTestObserver(this.api, {

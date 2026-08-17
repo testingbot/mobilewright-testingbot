@@ -17,6 +17,7 @@ export interface FakeSession {
   id: string;
   capabilities: Record<string, unknown>;
   deleted: boolean;
+  context?: string;
 }
 
 // 1x1 transparent PNG
@@ -134,10 +135,33 @@ export class FakeHub {
         }
         case '/actions':
           return wd(null);
-        case '/execute/sync':
+        case '/execute/sync': {
+          const script = String((body as { script?: string })?.script ?? '');
+          if (script === 'mobile: getContexts') {
+            return wd([
+              { id: 'NATIVE_APP' },
+              { id: 'WEBVIEW_com.example', title: 'Checkout', url: 'https://shop.example/cart' },
+            ]);
+          }
+          if (script.includes('document.readyState')) return wd('complete');
+          return wd(null);
+        }
+        case '/context':
+          if (method === 'POST') {
+            session.context = String((body as { name?: string })?.name ?? '');
+            return wd(null);
+          }
+          return wd(session.context ?? 'NATIVE_APP');
+        case '/contexts':
+          return wd(['NATIVE_APP', 'WEBVIEW_com.example']);
+        case '/title':
+          return wd('Checkout');
+        case '/back':
+        case '/forward':
+        case '/refresh':
           return wd(null);
         case '/url':
-          return wd(null);
+          return wd(method === 'GET' ? 'https://shop.example/cart' : null);
         default:
           return wd(null);
       }
