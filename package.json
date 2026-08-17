@@ -46,7 +46,7 @@
   },
   "dependencies": {
     "debug": "^4.4.0",
-    "fast-xml-parser": "^4.5.0"
+    "fast-xml-parser": "^5.7.0"
   },
   "devDependencies": {
     "@mobilewright/protocol": "0.0.53",
