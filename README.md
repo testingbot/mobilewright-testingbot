@@ -277,6 +277,19 @@ npm run build
 
 Live e2e tests against a real TestingBot account live in `e2e/` (see `e2e/mobilewright.config.ts`).
 
+### Releasing
+
+The version bump, tag and GitHub release are made locally — the TestingBot
+org's IP allow list blocks GitHub-hosted runners from pushing here — and the
+Release workflow then publishes to npm via trusted publishing (OIDC), so no
+npm token exists anywhere:
+
+```bash
+npm version minor -m "Release v%s"      # patch | minor | major
+git push --follow-tags
+gh release create "v$(node -p "require('./package.json').version")" --generate-notes
+```
+
 ## License
 
 Apache-2.0
