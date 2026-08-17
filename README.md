@@ -130,9 +130,9 @@ new TestingBotDriver({
 
 ## TestingBot commands inside tests
 
-Some TestingBot features are runtime commands rather than session capabilities.
-Import the `testingbot` helper and call them from a test body — it targets the
-device session mobilewright connected for that test:
+Some TestingBot features are runtime commands rather than session
+capabilities. Import the `testingbot` helper and call them from a test body —
+it targets the device session mobilewright connected for that test:
 
 ```ts
 import { test, expect } from '@mobilewright/test';
@@ -141,27 +141,53 @@ import { testingbot } from '@testingbot/mobilewright-driver';
 test('checkout survives a slow network', async ({ device, screen, bundleId }) => {
   await device.launchApp(bundleId);
 
-  await testingbot.throttle('3G');            // 'Edge' | '3G' | '4G' | 'airplane' | 'disable'
+  await testingbot.annotate('starting checkout');   // shows in the session timeline
+  await testingbot.throttle('3G');
   await expect(screen.getByText('Order placed')).toBeVisible();
-  await testingbot.throttle('disable');       // optional — see below
 
-  // custom conditions
-  await testingbot.throttle({ downloadSpeed: 10 * 1024, uploadSpeed: 10 * 1024, latency: 200, loss: 0 });
-
-  // Android ADB shell (whitelisted subset on physical devices)
-  await testingbot.shell('input', ['keyevent', '3']);
-
-  // any other Appium / TestingBot execute-script command
-  await testingbot.execute('mobile: deepLink', { url: 'myapp://cart' });
-
-  console.log('session:', testingbot.dashboardUrl());
+  console.log(testingbot.dashboardUrl());
 });
 ```
 
-Throttling is **reset automatically** when the test's device session is
-released, so slow-network conditions never leak into the next test that reuses
-the device. Calling a command outside a test body raises an explanatory error
-rather than a null-reference.
+### Available commands
+
+| Command | TestingBot command | What it does |
+| --- | --- | --- |
+| `throttle(conditions)` | `tb:throttle` | Network conditions mid-test: `'Edge'`, `'3G'`, `'4G'`, `'airplane'`, `'disable'`, or `{ downloadSpeed, uploadSpeed, latency, loss }` (kb/s, ms). Reset automatically at the end of the test. |
+| `annotate(text)` | `tb:test-context` | Logs a step into the session's command list, so the timeline shows what the test was doing. |
+| `setName(name)` | `tb:test-name` | Names the session on the dashboard. |
+| `setBuild(build)` | `tb:test-build` | Groups the session under a build. |
+| `setTags([...])` | `tb:test-tags` | Tags the session. |
+| `setResult(passed)` | `tb:test-result` | Overrides the pass/fail verdict (the driver reports it automatically — use this only for outcomes mobilewright cannot see). |
+| `updateInfo({...})` | `tb:test-info` | Bulk update: `name`, `build`, `public`, `statusMessage`, `extra`. |
+| `breakpoint()` | `tb:break` | Pauses the session for manual inspection with a live view. Debugging only — never leave it in CI. |
+| `shell(command, args)` | `mobile: shell` | ADB shell on Android (whitelisted subset on physical devices). |
+| `execute(script, ...args)` | any | Escape hatch for any Appium or TestingBot execute-script command. |
+| `sessionId()` / `dashboardUrl()` | — | This test's TestingBot session id and dashboard link. |
+
+Notes:
+
+- **Throttling is reset automatically** when the test's device session is
+  released, so slow-network conditions never leak into the next test that
+  reuses the device.
+- Calling a command outside a test body raises an explanatory error rather
+  than a null-reference.
+- `tb:intercept` and `tb:network` (request mocking and network logs) are
+  Chrome/Edge-only on TestingBot and are therefore not exposed here.
+
+### Recipe: name every session after its test
+
+```ts
+test.beforeEach(async ({ device }, testInfo) => {
+  await testingbot.setName(testInfo.title);
+  await testingbot.setTags([testInfo.project.name]);
+});
+```
+
+Requesting the `device` fixture is what makes the session exist before the
+hook runs. With `sessionPerTest: true` each session gets exactly one name;
+in pooled mode the last test to run on a session wins (the driver still
+reports per-test verdicts afterwards — see above).
 
 ## Testing localhost / staging servers (TestingBot Tunnel)
 
