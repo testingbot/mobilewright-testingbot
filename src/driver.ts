@@ -158,6 +158,7 @@ export class TestingBotDriver implements MobilewrightDriver {
           return [...byId.values()];
         },
         build: this.options.build,
+        extra: this.options.extra,
         recordings: () => this.runLog.recordings(),
       });
   }

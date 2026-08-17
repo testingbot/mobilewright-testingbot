@@ -113,4 +113,66 @@ describe('TestingBotTestObserver', () => {
     await observer.onRunEnd(runEnd('passed'));
     expect(api.updateTest).not.toHaveBeenCalled();
   });
+
+  it('reports git metadata from the run report as extra plus a branch tag', async () => {
+    const api = fakeApi();
+    const observer = new TestingBotTestObserver(api, {
+      sessions: () => [{ sessionId: 's1', spans: 0 }],
+      extra: 'release=2026.8',
+    });
+    observer.onRunStart({ totalTests: 1 });
+    observer.onTestEnd(testInfo('a'), result('passed'));
+    await observer.onRunEnd({
+      ...runEnd('passed'),
+      // Shape produced by Playwright's captureGitInfo, via mobilewright.
+      jsonReport: async () => ({
+        config: {
+          metadata: {
+            gitCommit: {
+              hash: 'abc1234def5678',
+              subject: 'fix checkout crash',
+              branch: 'feature/checkout',
+              author: { name: 'Jochen', email: 'j@example.com' },
+            },
+          },
+        },
+      }),
+    });
+
+    const update = api.updateTest.mock.calls[0]![1];
+    expect(JSON.parse(update.extra)).toEqual({
+      commit: 'abc1234def5678',
+      branch: 'feature/checkout',
+      author: 'Jochen',
+      subject: 'fix checkout crash',
+      extra: 'release=2026.8', // the user's own extra is preserved, not clobbered
+    });
+    expect(update.groups).toEqual(['mobilewright', 'feature/checkout']);
+  });
+
+  it('keeps reporting when git metadata is absent or the report throws', async () => {
+    const api = fakeApi();
+    const observer = new TestingBotTestObserver(api, {
+      sessions: () => [{ sessionId: 's1', spans: 0 }],
+      extra: 'release=2026.8',
+    });
+    observer.onRunStart({ totalTests: 1 });
+    observer.onTestEnd(testInfo('a'), result('passed'));
+    await observer.onRunEnd({
+      ...runEnd('passed'),
+      jsonReport: async () => { throw new Error('report gone'); },
+    });
+
+    const update = api.updateTest.mock.calls[0]![1];
+    expect(update.extra).toBe('release=2026.8'); // untouched
+    expect(update.groups).toEqual(['mobilewright']);
+
+    // ...and with no jsonReport at all (older/newer upstream shapes).
+    const api2 = fakeApi();
+    const observer2 = new TestingBotTestObserver(api2, { sessions: () => [{ sessionId: 's2', spans: 0 }] });
+    observer2.onRunStart({ totalTests: 1 });
+    observer2.onTestEnd(testInfo('a'), result('passed'));
+    await observer2.onRunEnd(runEnd('passed'));
+    expect(api2.updateTest.mock.calls[0]![1].extra).toBeUndefined();
+  });
 });

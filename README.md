@@ -92,6 +92,7 @@ Regexes and version ranges work on both real and virtual devices: real devices r
 
 - By default a device slot's TestingBot session is reused across tests (fast: you pay device startup once). Sessions that hosted exactly one test are named after that test with its own pass/fail; sessions that hosted several get a run summary (e.g. `12/12 tests passed`).
 - Set **`sessionPerTest: true`** for one session, video, and named verdict **per test** — the clearest dashboard, at the cost of device startup on every test.
+- Git metadata is reported automatically when mobilewright captures it: the commit hash, branch, author and subject land in the session's **extra** field (alongside your own `extra`, never replacing it), and the branch is added as a **tag** so the dashboard can filter by it. Enable it with `captureGitInfo: { commit: true }` in `mobilewright.config.ts` — Playwright turns it on by itself in CI.
 - Failure messages are reported to the session's status message; `build` groups sessions on the dashboard and **defaults automatically from CI environments** (GitHub Actions, GitLab, CircleCI, Buildkite, Bitrise, Travis, Azure DevOps, Jenkins, TeamCity → e.g. `owner/repo #123`), or from a `TESTINGBOT_BUILD` variable.
 
 ## All options
@@ -254,6 +255,7 @@ jobs:
 | view hierarchy | Appium page source, mapped to mobilewright's `ViewNode` tree |
 | webviews | Appium contexts (`webViewBridge`) |
 | pass/fail reporting | `PUT /v1/tests/:session` via the `TestObserver` hooks |
+| git metadata | commit/branch/author/subject from the run report → session `extra` + branch tag |
 | video | recorded by TestingBot; `startRecording({ output })` downloads the MP4 locally at run end |
 
 ## Current limitations

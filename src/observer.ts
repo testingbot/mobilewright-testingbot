@@ -20,10 +20,19 @@ export interface ReportableSession {
   endedAt?: number;
 }
 
+export interface GitInfo {
+  commit?: string;
+  branch?: string;
+  author?: string;
+  subject?: string;
+}
+
 export interface ObserverContext {
   /** Every TestingBot session of this run (allocated + worker-rotated). */
   sessions(): ReportableSession[];
   build?: string;
+  /** The driver's `extra` option, merged with git metadata when reporting. */
+  extra?: string;
   /** Local-video requests made via startRecording({ output }). */
   recordings?(): { sessionId: string; output: string }[];
 }
@@ -89,8 +98,13 @@ export class TestingBotTestObserver implements TestObserver {
       ? `${outcomes.length}/${this.totalTests} tests passed`
       : `${failures.length} of ${outcomes.length} tests failed. ${failures.join(' | ')}`.slice(0, 500);
 
+    const git = await readGitInfo(result);
+    const extra = buildExtra(this.context.extra, git);
+    const groups = ['mobilewright', ...(git?.branch ? [git.branch] : [])];
+
     const sessions = this.context.sessions();
-    debug('run ended (%s), reporting to %d session(s)', result.status, sessions.length);
+    debug('run ended (%s), reporting to %d session(s)%s', result.status, sessions.length,
+      git ? ` with git ${git.commit?.slice(0, 8) ?? '?'} (${git.branch ?? 'no branch'})` : '');
     for (const session of sessions) {
       const test = this.testForSession(session, outcomes);
       try {
@@ -100,13 +114,15 @@ export class TestingBotTestObserver implements TestObserver {
             name: test.title,
             statusMessage: test.failed ? (test.summary ?? 'failed') : 'passed',
             build: this.context.build,
-            groups: ['mobilewright'],
+            extra,
+            groups,
           }
           : {
             success,
             statusMessage: runMessage,
             build: this.context.build,
-            groups: ['mobilewright'],
+            extra,
+            groups,
           });
         debug('reported %s -> %s', session.sessionId, test ? `test "${test.title}"` : `run success=${success}`);
       } catch (err) {
@@ -183,4 +199,44 @@ export class TestingBotTestObserver implements TestObserver {
     }
     return undefined;
   }
+}
+
+/**
+ * Git metadata mobilewright captures into the Playwright report
+ * (`config.metadata.gitCommit`, populated when `captureGitInfo` is on —
+ * Playwright does this automatically on CI). `jsonReport()` is documented
+ * upstream as a transitional escape hatch, so every step is feature-detected
+ * and failures are silent: metadata must never break reporting.
+ */
+export async function readGitInfo(result: RunResultInfo): Promise<GitInfo | undefined> {
+  try {
+    const report = await result.jsonReport?.() as Record<string, unknown> | undefined;
+    const config = report?.['config'] as Record<string, unknown> | undefined;
+    const metadata = config?.['metadata'] as Record<string, unknown> | undefined;
+    const commit = metadata?.['gitCommit'] as Record<string, unknown> | undefined;
+    if (!commit) return undefined;
+    const author = commit['author'] as Record<string, unknown> | undefined;
+    const info: GitInfo = {
+      commit: str(commit['hash']),
+      branch: str(commit['branch']),
+      author: str(author?.['name']),
+      subject: str(commit['subject']),
+    };
+    return Object.values(info).some((v) => v !== undefined) ? info : undefined;
+  } catch (err) {
+    debug('could not read git metadata from the report: %s', err);
+    return undefined;
+  }
+}
+
+/** Merge the user's `extra` with git metadata for the dashboard's extra field. */
+export function buildExtra(userExtra: string | undefined, git: GitInfo | undefined): string | undefined {
+  if (!git) return userExtra;
+  const payload: Record<string, unknown> = { ...git };
+  if (userExtra !== undefined) payload['extra'] = userExtra;
+  return JSON.stringify(payload);
+}
+
+function str(value: unknown): string | undefined {
+  return typeof value === 'string' && value ? value : undefined;
 }
