@@ -1,0 +1,40 @@
+name: Publish to npm
+
+# Publishes via npm trusted publishing (OIDC): no npm token is stored in the
+# repo. Requires this workflow to be registered as the trusted publisher for
+# @testingbot/mobilewright-driver on npmjs.com (package settings → Trusted
+# Publisher → GitHub Actions, repo + workflow file "publish.yml").
+# Provenance attestations are generated automatically with OIDC publishes.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write # the OIDC token npm exchanges for a publish credential
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm >= 11.5.1
+      - run: npm install -g npm@latest && npm --version
+      - name: Release tag must match package.json version
+        run: |
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          TAG="${{ github.event.release.tag_name }}"
+          if [ "v${PKG_VERSION}" != "${TAG}" ] && [ "${PKG_VERSION}" != "${TAG}" ]; then
+            echo "package.json is ${PKG_VERSION} but the release tag is ${TAG}" >&2
+            exit 1
+          fi
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm publish # build runs via prepublishOnly; auth via OIDC
