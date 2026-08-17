@@ -6,6 +6,15 @@ Requires `mobilewright >= 0.0.53` (the first release that accepts driver instanc
 
 ## Quickstart
 
+**One command:**
+
+```bash
+npx @testingbot/mobilewright-driver init
+```
+
+answers a few questions and writes `mobilewright.config.ts` plus a sample
+test (add `--yes` for defaults). Or set up manually:
+
 **1. Install** (in your test project):
 
 ```bash

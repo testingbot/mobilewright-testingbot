@@ -59,5 +59,8 @@
     "testingbot-tunnel-launcher": {
       "optional": true
     }
+  },
+  "bin": {
+    "mobilewright-driver": "./dist/cli.js"
   }
 }
