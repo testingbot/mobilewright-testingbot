@@ -588,7 +588,18 @@ export class TestingBotDriver implements MobilewrightDriver {
       }]);
       return;
     }
-    await this.hub.execute(sessionId, 'mobile: activateApp', [{ appId: bundleId, bundleId }]);
+    try {
+      await this.hub.execute(sessionId, 'mobile: activateApp', [{ appId: bundleId, bundleId }]);
+    } catch (err) {
+      if (err instanceof Error && /launchable activity|No activity found/i.test(err.message)) {
+        throw new Error(
+          `TestingBotDriver could not launch "${bundleId}": the app has no resolvable launcher activity. ` +
+          "Pass the activity explicitly — device.launchApp(bundleId, { activity: '.MainActivity' }) — or " +
+          'build the APK with a MAIN/LAUNCHER intent filter.\n' + err.message,
+        );
+      }
+      throw err;
+    }
   }
 
   async terminateApp(bundleId: string): Promise<void> {

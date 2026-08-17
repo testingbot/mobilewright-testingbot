@@ -33,7 +33,8 @@ export class WebDriverError extends TestingBotError {
   readonly httpStatus: number;
 
   constructor(error: string, message: string, httpStatus: number) {
-    super(message ? `${error}: ${message}` : error);
+    // The hub sometimes puts identical text in both fields — don't double it.
+    super(!message || message === error ? (message || error) : `${error}: ${message}`);
     this.name = 'WebDriverError';
     this.error = error;
     this.httpStatus = httpStatus;
@@ -62,6 +63,10 @@ const RETRIABLE_PATTERNS = [
   /experiencing high load/i,
   /Could not acquire processing lock/i,
   /temporarily busy/i,
+  // Plan concurrency/queue-depth cap ("... maximum allowed parallel + queued
+  // tests for your TestingBot plan"): retriable — the pool re-queues the
+  // waiter and serves it from a freed slot at the next test boundary.
+  /limit of the maximum allowed parallel/i,
 ];
 
 /**

@@ -33,4 +33,19 @@ describe('toAllocationError', () => {
     const caps = new WebDriverError('invalid argument', 'platformVersion 99.0 is not supported', 400);
     expect(toAllocationError(caps)).toBe(caps);
   });
+
+  it('classifies the plan parallel+queue cap (real hub body) as retriable', () => {
+    // Captured live 2026-08-17 from a 20-workers-on-2-parallel run.
+    const body = 'You are currently at the limit of the maximum allowed parallel + queued tests ' +
+      'for your TestingBot plan. Your plan allows 2 parallel tests and 4 pending tests.';
+    const result = toAllocationError(new WebDriverError('session not created', body, 500));
+    expect(result).toBeInstanceOf(NoDeviceAvailableError);
+  });
+
+  it('does not duplicate identical error and message fields', () => {
+    const err = new WebDriverError('same text', 'same text', 500);
+    expect(err.message).toBe('same text');
+    const distinct = new WebDriverError('code', 'detail', 500);
+    expect(distinct.message).toBe('code: detail');
+  });
 });
