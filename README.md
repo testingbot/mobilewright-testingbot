@@ -88,7 +88,7 @@ Device selection comes from your mobilewright project config: `platform`, `devic
 
 ## Current limitations
 
-- By default one TestingBot session hosts several mobilewright tests (the pool reuses device slots) and pass/fail is reported per session as the run-level verdict. Set `sessionPerTest: true` for one session, video, and dashboard entry per test — at the cost of session startup (device boot) on every test.
+- By default one TestingBot session hosts several mobilewright tests (the pool reuses device slots) and pass/fail is reported per session as the run-level verdict. Set `sessionPerTest: true` for one session, video, and dashboard entry per test — each named after its test with its own pass/fail — at the cost of session startup (device boot) on every test.
 - Modifier key chords (`pressKeys(['ctrl+a'])`) work on Android only — XCUITest cannot hold modifier keys; on iOS, `clearText()` deletes the focused field with backspaces instead.
 - `pressButton` on iOS supports `HOME`, `VOLUME_UP`, `VOLUME_DOWN`; `listApps()` reports the foreground app only.
 - Screenshots are always PNG; webviews (`webViewBridge`) are not implemented yet. `applyDeviceSettings` turns Android animations off best-effort via `mobile: shell` (a no-op on iOS, and silently skipped when the shell feature is unavailable).

@@ -61,6 +61,8 @@ interface ActiveSession {
   platform: Platform;
   deviceType?: DeviceType;
   screenSize?: ScreenSize;
+  /** Wall-clock ms of connect(); brackets the test in sessionPerTest mode. */
+  connectedAt: number;
 }
 
 const ANDROID_BUTTON_KEYCODES: Record<HardwareButton, number> = {
@@ -132,8 +134,15 @@ export class TestingBotDriver implements MobilewrightDriver {
       ? undefined
       : new TestingBotTestObserver(this.api, {
         // Union of coordinator-allocated sessions and (with sessionPerTest)
-        // the per-test sessions workers logged to the shared run file.
-        sessionIds: () => [...new Set([...this.everAllocated.keys(), ...this.runLog.sessionIds()])],
+        // the per-test sessions workers logged to the shared run file;
+        // a timed worker record wins over the coordinator's untimed one.
+        sessions: () => {
+          const byId = new Map(
+            [...this.everAllocated.keys()].map((sessionId) => [sessionId, { sessionId }]),
+          );
+          for (const record of this.runLog.sessions()) byId.set(record.sessionId, record);
+          return [...byId.values()];
+        },
         build: this.options.build,
       });
   }
@@ -297,7 +306,7 @@ export class TestingBotDriver implements MobilewrightDriver {
     if (!this.options.sessionPerTest) {
       // Liveness probe — also validates the id belongs to a live TB session.
       await this.hub.get(poolDeviceId, '/orientation', { timeout });
-      this.active = { sessionId: poolDeviceId, platform: config.platform, deviceType: config.deviceType };
+      this.active = { sessionId: poolDeviceId, platform: config.platform, deviceType: config.deviceType, connectedAt: Date.now() };
       debug('connected to session %s', poolDeviceId);
       return { deviceId: poolDeviceId, platform: config.platform };
     }
@@ -318,7 +327,7 @@ export class TestingBotDriver implements MobilewrightDriver {
       this.rotatedDeviceIds.add(poolDeviceId);
     }
     sessionId ??= await this.startFreshSession(config);
-    this.active = { sessionId, platform: config.platform, deviceType: config.deviceType };
+    this.active = { sessionId, platform: config.platform, deviceType: config.deviceType, connectedAt: Date.now() };
     debug('connected to session %s (slot %s)', sessionId, poolDeviceId);
     return { deviceId: poolDeviceId, platform: config.platform };
   }
@@ -332,8 +341,15 @@ export class TestingBotDriver implements MobilewrightDriver {
       return;
     }
     // sessionPerTest: this test's session ends here; the next connect starts
-    // a fresh one. release()/dispose() failures on the long-gone original
-    // pool session are swallowed there.
+    // a fresh one. The timed record lets the observer attribute this test's
+    // verdict to exactly this session. release()/dispose() failures on the
+    // long-gone original pool session are swallowed there.
+    this.runLog.append({
+      type: 'session',
+      sessionId: session.sessionId,
+      startedAt: session.connectedAt,
+      endedAt: Date.now(),
+    });
     await this.hub.deleteSession(session.sessionId)
       .catch(() => this.api.stopTest(session.sessionId).catch(() => { }));
     debug('ended per-test session %s', session.sessionId);

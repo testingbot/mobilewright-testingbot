@@ -15,6 +15,10 @@ import { createHash } from 'node:crypto';
 export interface SessionRecord {
   type: 'session';
   sessionId: string;
+  /** Wall-clock ms of connect()/disconnect() — present on records written at
+   *  test end, used to attribute a test's verdict to its session. */
+  startedAt?: number;
+  endedAt?: number;
 }
 
 export interface AppRecord {
@@ -61,8 +65,20 @@ export class RunLog {
     }
   }
 
+  /** Session records, deduplicated by id — a timed record (written at test
+   *  end) wins over an untimed one (written at session start). */
+  sessions(): SessionRecord[] {
+    const byId = new Map<string, SessionRecord>();
+    for (const record of this.read()) {
+      if (record.type !== 'session') continue;
+      const existing = byId.get(record.sessionId);
+      if (!existing || record.endedAt !== undefined) byId.set(record.sessionId, record);
+    }
+    return [...byId.values()];
+  }
+
   sessionIds(): string[] {
-    return this.read().filter((r): r is SessionRecord => r.type === 'session').map((r) => r.sessionId);
+    return this.sessions().map((r) => r.sessionId);
   }
 
   appUrlFor(platform: string, deviceType: string | undefined): string | undefined {
