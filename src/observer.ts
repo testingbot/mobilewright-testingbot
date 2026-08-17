@@ -105,18 +105,25 @@ export class TestingBotTestObserver implements TestObserver {
     }
   }
 
-  /** The single test that ran inside this session, when unambiguous. */
+  /**
+   * The single test that ran inside this session, when unambiguous.
+   * Direction matters: connect() and disconnect() happen INSIDE the test, so
+   * the session interval is a sub-interval of its test's — but a test's
+   * reported duration also covers fixture setup (device allocation), so the
+   * test interval is much wider than the session's. The session midpoint must
+   * therefore be looked up in the test intervals, never the other way around.
+   */
   private testForSession(session: ReportableSession, outcomes: TestOutcome[]): TestOutcome | undefined {
     if (session.startedAt === undefined || session.endedAt === undefined) return undefined;
-    // Clock skew tolerance: connect/disconnect bracket the test loosely.
+    const midpoint = (session.startedAt + session.endedAt) / 2;
+    // Clock skew tolerance between the worker's stamps and ours.
     const SLACK_MS = 2_000;
-    const contained = outcomes.filter((o) => {
-      const midpoint = (o.startedAt + o.endedAt) / 2;
-      return midpoint >= session.startedAt! - SLACK_MS && midpoint <= session.endedAt! + SLACK_MS;
-    });
-    if (contained.length === 1) return contained[0];
-    if (contained.length > 1) {
-      debug('%d tests overlap session %s — falling back to the run verdict', contained.length, session.sessionId);
+    const containing = outcomes.filter((o) =>
+      midpoint >= o.startedAt - SLACK_MS && midpoint <= o.endedAt + SLACK_MS,
+    );
+    if (containing.length === 1) return containing[0];
+    if (containing.length > 1) {
+      debug('%d tests overlap session %s — falling back to the run verdict', containing.length, session.sessionId);
     }
     return undefined;
   }

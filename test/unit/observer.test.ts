@@ -4,8 +4,8 @@ import { TestingBotTestObserver } from '../../src/observer.js';
 import type { RestApiClient } from '../../src/rest-api.js';
 
 const testInfo = (title: string): TestInfo => ({ id: title, title, titlePath: ['', 'ios', 'file', title] });
-const result = (status: TestResultInfo['status'], errors: string[] = []): TestResultInfo =>
-  ({ status, retry: 0, duration: 100, errors, steps: [] });
+const result = (status: TestResultInfo['status'], errors: string[] = [], duration = 100): TestResultInfo =>
+  ({ status, retry: 0, duration, errors, steps: [] });
 const runEnd = (status: RunResultInfo['status']): RunResultInfo =>
   ({ status, startTime: new Date(0), duration: 1000 });
 
@@ -58,21 +58,24 @@ describe('TestingBotTestObserver', () => {
     const api = fakeApi();
     const now = Date.now();
     const observer = new TestingBotTestObserver(api, {
+      // sessionPerTest: connect/disconnect happen INSIDE each test, and the
+      // test's reported duration also covers fixture setup (allocation), so
+      // each session interval is a narrow sub-interval of its test's.
       sessions: () => [
-        // sessionPerTest: one timed session per test, sequential in time.
-        { sessionId: 'sess-pass', startedAt: now - 400_000, endedAt: now - 200_000 },
-        { sessionId: 'sess-fail', startedAt: now - 200_000, endedAt: now + 5_000 },
+        { sessionId: 'sess-pass', startedAt: now - 260_000, endedAt: now - 210_000 },
+        { sessionId: 'sess-fail', startedAt: now - 60_000, endedAt: now - 10_000 },
         { sessionId: 'sess-untimed' },
       ],
     });
     observer.onRunStart({ totalTests: 2 });
-    // First test "ends" 300s ago — simulate by monkey-patching Date.now around the call.
+    // Test 1 ends 200s ago with a 150s duration (allocation included);
+    // test 2 ends now. Monkey-patch Date.now around the callbacks.
     const realNow = Date.now;
     try {
-      Date.now = () => now - 300_000;
-      observer.onTestEnd(testInfo('login works'), result('passed'));
+      Date.now = () => now - 200_000;
+      observer.onTestEnd(testInfo('login works'), result('passed', [], 150_000));
       Date.now = () => now;
-      observer.onTestEnd(testInfo('checkout fails'), result('failed', ['Error: boom']));
+      observer.onTestEnd(testInfo('checkout fails'), result('failed', ['Error: boom'], 150_000));
     } finally {
       Date.now = realNow;
     }

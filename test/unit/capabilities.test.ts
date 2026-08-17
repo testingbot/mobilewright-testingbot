@@ -22,6 +22,7 @@ describe('buildCapabilities', () => {
       realDevice: false,
       screenrecorder: true,
       idletimeout: 230,
+      name: 'mobilewright', // sessions must never show unnamed on the dashboard
     });
   });
 

@@ -119,7 +119,9 @@ export function buildCapabilities(
   };
   if (options.maxDuration !== undefined) tbOptions['maxduration'] = options.maxDuration;
   if (options.appiumVersion !== undefined) tbOptions['appiumVersion'] = options.appiumVersion;
-  if (options.name !== undefined) tbOptions['name'] = options.name;
+  // Always name the session so it never shows as unnamed on the dashboard;
+  // the observer renames per-test sessions to their test's title at run end.
+  tbOptions['name'] = options.name ?? 'mobilewright';
   if (options.build !== undefined) tbOptions['build'] = options.build;
 
   Object.assign(tbOptions, options.tbOptions);

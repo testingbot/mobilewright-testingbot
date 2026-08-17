@@ -33,11 +33,12 @@ export class Keepalive {
           // not leave a live session unprotected from the idle reaper.
           const gone = err instanceof WebDriverError && (err.httpStatus === 404 || err.error === 'invalid session id');
           failures += 1;
+          const reason = err instanceof Error ? err.message.split('\n')[0] : String(err);
           if (gone || failures >= MAX_CONSECUTIVE_FAILURES) {
-            debug('ping failed for %s (%s), stopping keepalive: %s', sessionId, gone ? 'session gone' : 'repeated failures', err);
+            debug('ping failed for %s (%s), stopping keepalive: %s', sessionId, gone ? 'session gone' : 'repeated failures', reason);
             this.stop(sessionId);
           } else {
-            debug('transient ping failure %d/%d for %s: %s', failures, MAX_CONSECUTIVE_FAILURES, sessionId, err);
+            debug('transient ping failure %d/%d for %s: %s', failures, MAX_CONSECUTIVE_FAILURES, sessionId, reason);
           }
         },
       );
