@@ -8,6 +8,15 @@ import { USER_AGENT } from './version.js';
 
 const debug = createDebug('testingbot:rest');
 
+export interface UserInfo {
+  plan?: string;
+  /** Plan cap on parallel VM (simulator/emulator) sessions. */
+  max_concurrent?: number;
+  /** Plan cap on parallel physical-device sessions. */
+  max_concurrent_mobile?: number;
+  [key: string]: unknown;
+}
+
 export interface TestingBotDevice {
   id: number;
   name: string;
@@ -66,8 +75,8 @@ export class RestApiClient {
   }
 
   /** Validate credentials; used by prepare() to fail fast. */
-  async getUser(): Promise<Record<string, unknown>> {
-    return await this.request('GET', '/user') as Record<string, unknown>;
+  async getUser(): Promise<UserInfo> {
+    return await this.request('GET', '/user') as UserInfo;
   }
 
   /** Physical devices. `available` restricts to currently-acquirable ones. */

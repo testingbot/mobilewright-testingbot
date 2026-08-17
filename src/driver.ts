@@ -41,7 +41,7 @@ import { Keepalive } from './keepalive.js';
 import { parseChord, toAndroidKeyPress, toW3CKeyActions, typeTextActions } from './keys.js';
 import { TestingBotTestObserver } from './observer.js';
 import { requireCredentials, resolveOptions, type ResolvedOptions, type TestingBotDriverOptions } from './options.js';
-import { RestApiClient } from './rest-api.js';
+import { RestApiClient, type UserInfo } from './rest-api.js';
 import { RunLog } from './run-log.js';
 import { TunnelManager } from './tunnel.js';
 import { AppiumWebViewBridge } from './webview.js';
@@ -126,6 +126,11 @@ export class TestingBotDriver implements MobilewrightDriver {
   private active: ActiveSession | undefined;
   /** sessionPerTest: pool slots whose original session this instance has already probed/used. */
   private readonly rotatedDeviceIds = new Set<string>();
+  /** Plan limits from GET /v1/user, for the over-parallelism warning. */
+  private userInfo: UserInfo | undefined;
+  /** Allocations currently waiting on POST /session. */
+  private inFlightAllocations = 0;
+  private warnedAboutParallelism = false;
 
   constructor(options: TestingBotDriverOptions = {}) {
     this.options = resolveOptions(options);
@@ -159,8 +164,9 @@ export class TestingBotDriver implements MobilewrightDriver {
   async prepare(): Promise<void> {
     requireCredentials(this.options);
     this.runLog.truncate(); // drop session/app records from any previous run
-    await this.api.getUser();
-    debug('credentials verified against %s', this.options.apiUrl);
+    this.userInfo = await this.api.getUser();
+    debug('credentials verified against %s (plan %s, parallel %s vm / %s device)',
+      this.options.apiUrl, this.userInfo.plan, this.userInfo.max_concurrent, this.userInfo.max_concurrent_mobile);
     await this.tunnel.start(this.options);
   }
 
@@ -172,6 +178,7 @@ export class TestingBotDriver implements MobilewrightDriver {
     requireCredentials(this.options);
     // takenDeviceIds is unused: every allocate() creates a fresh, exclusive
     // WebDriver session; physical-device contention is handled server-side.
+    this.warnIfOverParallel(criteria);
 
     let pinned: PinnedDevice | undefined;
     let reservedName: string | undefined;
@@ -219,6 +226,7 @@ export class TestingBotDriver implements MobilewrightDriver {
     // pool aborts — is handled by deleting the session that slipped through.
     let sessionId: string;
     let caps: Record<string, unknown>;
+    this.inFlightAllocations += 1;
     try {
       const controller = new AbortController();
       const onAbort = () => controller.abort();
@@ -246,6 +254,8 @@ export class TestingBotDriver implements MobilewrightDriver {
     } catch (err) {
       if (reservedName) this.unpin(reservedName);
       throw err;
+    } finally {
+      this.inFlightAllocations -= 1;
     }
 
     const platform = criteria.platform ?? (String(caps['platformName']).toLowerCase() === 'ios' ? 'ios' : 'android');
@@ -697,6 +707,30 @@ export class TestingBotDriver implements MobilewrightDriver {
   private session(): ActiveSession {
     if (!this.active) throw new SessionNotActiveError();
     return this.active;
+  }
+
+  /**
+   * Requesting more parallel sessions than the plan allows is not fatal —
+   * TestingBot queues the extras — but the wait happens inside mobilewright's
+   * test-scoped device fixture, so queued tests can hit the Playwright test
+   * timeout with a confusing "timed out setting up device" failure. Warn once
+   * with the actual numbers instead.
+   */
+  private warnIfOverParallel(criteria: AllocationCriteria): void {
+    if (this.warnedAboutParallelism || !this.userInfo) return;
+    const isReal = criteria.deviceType === 'real';
+    const limit = isReal ? this.userInfo.max_concurrent_mobile : this.userInfo.max_concurrent;
+    if (typeof limit !== 'number' || limit <= 0) return;
+    const wanted = this.allocated.size + this.inFlightAllocations + 1;
+    if (wanted > limit) {
+      this.warnedAboutParallelism = true;
+      console.warn(
+        `TestingBotDriver: this run wants ${wanted}+ parallel ${isReal ? 'device' : 'VM'} sessions but the ` +
+        `plan allows ${limit}. Extra allocations queue until a slot frees up, and the wait counts against ` +
+        `mobilewright's test timeout — set workers: ${limit} (or fewer) in mobilewright.config.ts, or raise ` +
+        'the test timeout to cover the expected queue time.',
+      );
+    }
   }
 
   private unpin(name: string): void {

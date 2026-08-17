@@ -159,6 +159,24 @@ describe('pool lifecycle against FakeHub', () => {
     await driver.dispose();
   });
 
+  it('warns once when the run wants more parallel sessions than the plan allows', async () => {
+    const { vi } = await import('vitest');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => { });
+    try {
+      await coordinator.prepare(); // learns max_concurrent: 2 from /v1/user
+      const a = await coordinator.allocate({ platform: 'ios' }, new Set());
+      const b = await coordinator.allocate({ platform: 'ios' }, new Set());
+      expect(warn).not.toHaveBeenCalled(); // at the limit is fine
+      const c = await coordinator.allocate({ platform: 'ios' }, new Set());
+      const d = await coordinator.allocate({ platform: 'ios' }, new Set());
+      expect(warn).toHaveBeenCalledTimes(1); // over the limit, warned once
+      expect(String(warn.mock.calls[0]![0])).toContain('plan allows 2');
+      for (const s of [a, b, c, d]) await coordinator.release(s.deviceId);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('observer reports the run verdict to every session, even after release', async () => {
     const a = await coordinator.allocate({ platform: 'ios' }, new Set());
     const b = await coordinator.allocate({ platform: 'ios' }, new Set());

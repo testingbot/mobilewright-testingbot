@@ -168,7 +168,7 @@ export class FakeHub {
     }
 
     // ─── REST API ─────────────────────────────────────────────────
-    if (path === '/v1/user') return rest({ first_name: 'Zaphod' });
+    if (path === '/v1/user') return rest({ first_name: 'Zaphod', plan: 'TEST', max_concurrent: 2, max_concurrent_mobile: 1 });
     if (path === '/v1/browsers') {
       return rest([
         { name: 'chrome', platformName: 'Android', deviceName: 'Pixel 9', version: '16.0' },
