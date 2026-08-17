@@ -114,4 +114,14 @@ describe('buildCapabilities', () => {
     expect(plain.tunnel).toEqual({});
     expect(plain.tunnelIdentifier).toBeUndefined();
   });
+
+  it('maps popup-handling options to the right platform only', () => {
+    const opts = resolveOptions({ key: 'k', secret: 's', autoGrantPermissions: true, autoAcceptAlerts: true });
+    const android = buildCapabilities({ platform: 'android' }, opts, undefined, 'tb://app');
+    expect(android.alwaysMatch['appium:autoGrantPermissions']).toBe(true);
+    expect(android.alwaysMatch['appium:autoAcceptAlerts']).toBeUndefined();
+    const ios = buildCapabilities({ platform: 'ios' }, opts, undefined, 'tb://app');
+    expect(ios.alwaysMatch['appium:autoAcceptAlerts']).toBe(true);
+    expect(ios.alwaysMatch['appium:autoGrantPermissions']).toBeUndefined();
+  });
 });

@@ -74,6 +74,10 @@ export interface TestingBotDriverOptions {
   public?: boolean;
   /** Custom metadata (release, commit hash, ...) shown on the test detail page. */
   extra?: string;
+  /** Android: auto-grant all app permission dialogs (`appium:autoGrantPermissions`). */
+  autoGrantPermissions?: boolean;
+  /** iOS: auto-accept system permission alerts (`appium:autoAcceptAlerts`). */
+  autoAcceptAlerts?: boolean;
   /** Restrict allocation to tablets only. */
   tabletOnly?: boolean;
   /** Restrict allocation to phones only. */
@@ -128,6 +132,8 @@ export interface ResolvedOptions {
   recordLogs: boolean | 'strip-parameters' | undefined;
   public: boolean | undefined;
   extra: string | undefined;
+  autoGrantPermissions: boolean | undefined;
+  autoAcceptAlerts: boolean | undefined;
   tabletOnly: boolean | undefined;
   phoneOnly: boolean | undefined;
   tunnelIdentifier: string | undefined;
@@ -167,6 +173,8 @@ export function resolveOptions(options: TestingBotDriverOptions = {}): ResolvedO
     recordLogs: options.recordLogs,
     public: options.public,
     extra: options.extra,
+    autoGrantPermissions: options.autoGrantPermissions,
+    autoAcceptAlerts: options.autoAcceptAlerts,
     tabletOnly: options.tabletOnly,
     phoneOnly: options.phoneOnly,
     tunnelIdentifier: options.tunnelIdentifier ?? (typeof options.tunnel === 'object' ? options.tunnel.identifier : undefined),

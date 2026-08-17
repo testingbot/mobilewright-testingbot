@@ -110,6 +110,13 @@ export function buildCapabilities(
     }
   }
 
+  if (platform === 'android' && options.autoGrantPermissions !== undefined) {
+    caps['appium:autoGrantPermissions'] = options.autoGrantPermissions;
+  }
+  if (platform === 'ios' && options.autoAcceptAlerts !== undefined) {
+    caps['appium:autoAcceptAlerts'] = options.autoAcceptAlerts;
+  }
+
   const tbOptions: Record<string, unknown> = {
     key: options.key,
     secret: options.secret,

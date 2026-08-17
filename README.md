@@ -113,6 +113,8 @@ new TestingBotDriver({
   timeZone: 'Europe/Brussels',   // device timezone (tz database name)
   geoCountryCode: 'DE',          // route device traffic via a proxy in this country
   throttleNetwork: '3G',         // or { downloadSpeed, uploadSpeed, latency, loss }
+  autoGrantPermissions: true,    // Android: auto-grant app permission dialogs
+  autoAcceptAlerts: true,        // iOS: auto-accept system permission alerts
   screenshots: true,             // screenshot at every step (default false)
   video: true,                   // session video (default true)
   recordLogs: 'strip-parameters',// command logs: true | false | 'strip-parameters'
