@@ -1,0 +1,64 @@
+name: Release
+
+# One-click release: bumps the version, pushes the commit + tag, creates a
+# GitHub release with generated notes, and publishes to npm via OIDC.
+# The publish job lives HERE (not only in publish.yml) because releases
+# created with GITHUB_TOKEN do not trigger other workflows; publish.yml still
+# covers releases a human creates in the GitHub UI.
+#
+# Run from the Actions tab, or: gh workflow run release.yml -f bump=patch
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump
+        type: choice
+        required: true
+        default: patch
+        options: [patch, minor, major]
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm >= 11.5.1
+      - run: npm install -g npm@latest && npm --version
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+      - name: Bump version, push commit and tag
+        id: bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          npm version "${{ inputs.bump }}" -m "Release v%s"
+          VERSION="$(node -p "require('./package.json').version")"
+          git push --follow-tags
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "v${{ steps.bump.outputs.version }}" --generate-notes --title "v${{ steps.bump.outputs.version }}"
+
+      - name: Publish to npm (OIDC)
+        run: |
+          VERSION="${{ steps.bump.outputs.version }}"
+          if npm view "@testingbot/mobilewright-driver@${VERSION}" version >/dev/null 2>&1; then
+            echo "v${VERSION} is already on npm — skipping publish"
+            exit 0
+          fi
+          npm publish

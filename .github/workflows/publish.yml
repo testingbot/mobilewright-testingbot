@@ -37,4 +37,11 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
-      - run: npm publish # build runs via prepublishOnly; auth via OIDC
+      - name: Publish to npm (OIDC)
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          if npm view "@testingbot/mobilewright-driver@${VERSION}" version >/dev/null 2>&1; then
+            echo "v${VERSION} is already on npm — skipping publish"
+            exit 0
+          fi
+          npm publish # build runs via prepublishOnly; auth via OIDC
