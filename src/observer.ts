@@ -1,3 +1,4 @@
+import { writeFile } from 'node:fs/promises';
 import createDebug from 'debug';
 import type {
   RunResultInfo,
@@ -23,6 +24,8 @@ export interface ObserverContext {
   /** Every TestingBot session of this run (allocated + worker-rotated). */
   sessions(): ReportableSession[];
   build?: string;
+  /** Local-video requests made via startRecording({ output }). */
+  recordings?(): { sessionId: string; output: string }[];
 }
 
 interface TestOutcome {
@@ -109,6 +112,42 @@ export class TestingBotTestObserver implements TestObserver {
       } catch (err) {
         // Never fail the run over reporting.
         console.warn(`TestingBotDriver: could not report result for session ${session.sessionId}: ${String(err)}`);
+      }
+    }
+
+    await this.downloadRecordings();
+  }
+
+  /**
+   * Fetch session videos requested via startRecording({ output }). The MP4
+   * finalizes only after the session ends, so this waits (bounded) for the
+   * asset to appear. Best-effort like all reporting.
+   */
+  private async downloadRecordings(): Promise<void> {
+    const requests = this.context.recordings?.() ?? [];
+    const deadline = Date.now() + 120_000;
+    for (const request of requests) {
+      try {
+        let videoUrl: string | undefined;
+        for (; ;) {
+          const test = await this.api.getTest(request.sessionId);
+          if (typeof test.video === 'string' && test.video) {
+            videoUrl = test.video;
+            break;
+          }
+          if (Date.now() >= deadline) break;
+          await new Promise((resolve) => setTimeout(resolve, 3_000));
+        }
+        if (!videoUrl) {
+          console.warn(`TestingBotDriver: video for session ${request.sessionId} was not ready in time; skipping ${request.output}`);
+          continue;
+        }
+        const response = await fetch(videoUrl, { signal: AbortSignal.timeout(60_000) });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        await writeFile(request.output, Buffer.from(await response.arrayBuffer()));
+        debug('saved recording of %s to %s', request.sessionId, request.output);
+      } catch (err) {
+        console.warn(`TestingBotDriver: could not download video for session ${request.sessionId}: ${String(err)}`);
       }
     }
   }

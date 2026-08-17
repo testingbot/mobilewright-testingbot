@@ -176,6 +176,12 @@ export class FakeHub {
         ],
       });
     }
+    const videoMatch = path.match(/^\/videos\/([^/]+)\.mp4$/);
+    if (videoMatch) {
+      res.writeHead(200, { 'Content-Type': 'video/mp4' });
+      res.end(Buffer.from(`fake-mp4-bytes-for-${videoMatch[1]}`));
+      return;
+    }
     const testMatch = path.match(/^\/v1\/tests\/([^/]+)(\/stop)?$/);
     if (testMatch) {
       const [, id, stop] = testMatch;
@@ -188,7 +194,7 @@ export class FakeHub {
         this.testUpdates.set(id!, body as Record<string, string | string[]>);
         return rest({ success: true });
       }
-      return rest({ id, video: `https://testingbot.com/videos/${id}.mp4`, duration: 12 });
+      return rest({ id, video: `http://127.0.0.1:${this.port}/videos/${id}.mp4`, duration: 12 });
     }
 
     rest({ error: `FakeHub: unhandled ${method} ${path}` }, 404);

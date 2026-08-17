@@ -146,6 +146,7 @@ export class TestingBotDriver implements MobilewrightDriver {
           return [...byId.values()];
         },
         build: this.options.build,
+        recordings: () => this.runLog.recordings(),
       });
   }
 
@@ -660,9 +661,14 @@ export class TestingBotDriver implements MobilewrightDriver {
 
   // ─── MobilewrightSession: recording ────────────────────────────
 
-  async startRecording(_opts: RecordingOptions): Promise<void> {
+  async startRecording(opts: RecordingOptions): Promise<void> {
     // TestingBot records every session (tb:options.screenrecorder is enabled
-    // by default in buildCapabilities); nothing to start.
+    // by default in buildCapabilities); nothing to start. When the caller
+    // wants a local file, note the request — the video only finalizes after
+    // the session ends, so the observer downloads it at run end.
+    if (opts.output) {
+      this.runLog.append({ type: 'recording', sessionId: this.session().sessionId, output: opts.output });
+    }
   }
 
   async stopRecording(): Promise<RecordingResult> {

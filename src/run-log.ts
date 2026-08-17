@@ -28,7 +28,14 @@ export interface AppRecord {
   url: string;
 }
 
-type Record_ = SessionRecord | AppRecord;
+export interface RecordingRecord {
+  type: 'recording';
+  sessionId: string;
+  /** Local MP4 path the caller asked stopRecording() to produce. */
+  output: string;
+}
+
+type Record_ = SessionRecord | AppRecord | RecordingRecord;
 
 export interface MergedSession {
   sessionId: string;
@@ -97,6 +104,10 @@ export class RunLog {
 
   sessionIds(): string[] {
     return this.sessions().map((r) => r.sessionId);
+  }
+
+  recordings(): RecordingRecord[] {
+    return this.read().filter((r): r is RecordingRecord => r.type === 'recording');
   }
 
   appUrlFor(platform: string, deviceType: string | undefined): string | undefined {

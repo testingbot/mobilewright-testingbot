@@ -255,4 +255,30 @@ describe('sessionPerTest against FakeHub', () => {
     await worker2.disconnect();
     await coordinator.dispose();
   });
+
+  it('downloads the session video to the requested output path at run end', async () => {
+    const coordinator = new TestingBotDriver(options());
+    await coordinator.prepare();
+    const allocated = await coordinator.allocate({ platform: 'ios', deviceType: 'simulator' }, new Set());
+
+    const worker = new TestingBotDriver(options());
+    await worker.connect({ platform: 'ios', deviceId: allocated.deviceId, deviceType: 'simulator' });
+    const output = join(tmpdir(), `tb-e2e-video-${Date.now()}.mp4`);
+    await worker.startRecording({ output });
+    const result = await worker.stopRecording();
+    expect(result.url).toContain('/videos/');
+    await worker.disconnect();
+    await coordinator.release(allocated.deviceId);
+
+    coordinator.observer!.onRunStart?.({ totalTests: 1 });
+    coordinator.observer!.onTestEnd?.(
+      { id: 't1', title: 'recorded test', titlePath: ['', 'ios', 'f', 'recorded test'] },
+      { status: 'passed', retry: 0, duration: 5, errors: [], steps: [] },
+    );
+    await coordinator.observer!.onRunEnd?.({ status: 'passed', startTime: new Date(0), duration: 1 });
+
+    const { readFileSync } = await import('node:fs');
+    expect(readFileSync(output, 'utf-8')).toContain('fake-mp4-bytes-for-');
+    await coordinator.dispose();
+  });
 });

@@ -1,0 +1,30 @@
+name: Nightly upstream compat
+
+# Catches mobilewright 0.0.x churn the day it lands: the driver pins its floor
+# at 0.0.53, but upstream iterates fast and 0.0.x releases may break the
+# protocol surface without semver signaling.
+on:
+  schedule:
+    - cron: '23 4 * * *'
+  workflow_dispatch:
+
+jobs:
+  compat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Upgrade to latest upstream
+        run: npm install --no-save "@mobilewright/protocol@latest"
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: e2e harness resolves against latest mobilewright
+        working-directory: e2e
+        run: |
+          npm install --no-save mobilewright@latest @mobilewright/test@latest
+          npx mobilewright test --list
