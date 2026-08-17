@@ -61,10 +61,9 @@
     }
   },
   "bin": {
-    "mobilewright-driver": "./dist/cli.js"
+    "mobilewright-driver": "dist/cli.js"
   },
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   }
 }
