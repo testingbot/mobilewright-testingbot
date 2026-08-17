@@ -138,7 +138,7 @@ describe('pool lifecycle against FakeHub', () => {
 
     const allocated = await driver.allocate({ platform: 'android', deviceType: 'emulator' }, new Set());
     expect(hub.uploadCount).toBe(1);
-    expect(hub.liveSessions()[0]!.capabilities['appium:app']).toBe('tb://fakeapp');
+    expect(hub.liveSessions()[0]!.capabilities['appium:app']).toBe('tb://fake-app');
 
     const worker = new TestingBotDriver({ ...driverOptions(), apps: { android: apkPath } });
     await worker.connect({ platform: 'android', deviceId: allocated.deviceId, deviceType: 'emulator' });
@@ -164,8 +164,8 @@ describe('pool lifecycle against FakeHub', () => {
     const allocated = await driver.allocate({ platform: 'android', deviceType: 'emulator' }, new Set());
     expect(hub.uploadCount).toBe(2); // both binaries uploaded once
     const caps = hub.liveSessions()[0]!.capabilities;
-    expect(caps['appium:app']).toBe('tb://fakeapp');
-    expect(caps['appium:otherApps']).toEqual(['tb://fakeapp']); // FakeHub returns one key for both
+    expect(caps['appium:app']).toBe('tb://multi-main');       // first entry = app under test
+    expect(caps['appium:otherApps']).toEqual(['tb://multi-helper']);
 
     // mobilewright calls installApp for every installApps entry — each of the
     // declared apps must be accepted as already installed.
@@ -177,6 +177,31 @@ describe('pool lifecycle against FakeHub', () => {
     const stranger = join(tmpdir(), 'multi-stranger.apk');
     writeFileSync(stranger, Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.from('stranger')]));
     await expect(worker.installApp(stranger)).rejects.toThrow(/cannot install .* mid-session/);
+
+    // A second slot reuses the same uploads instead of re-uploading.
+    const second = await driver.allocate({ platform: 'android', deviceType: 'emulator' }, new Set());
+    expect(hub.uploadCount).toBe(2);
+    expect(hub.liveSessions().map((s) => s.capabilities['appium:otherApps']))
+      .toEqual([['tb://multi-helper'], ['tb://multi-helper']]);
+
+    await driver.release(allocated.deviceId);
+    await driver.release(second.deviceId);
+    await driver.dispose();
+  });
+
+  it('single-app string config produces no otherApps and installs normally', async () => {
+    const only = join(tmpdir(), 'solo-app.apk');
+    writeFileSync(only, Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.from('solo-bytes')]));
+    const driver = new TestingBotDriver({ ...driverOptions(), apps: { android: only } });
+
+    const allocated = await driver.allocate({ platform: 'android', deviceType: 'emulator' }, new Set());
+    const caps = hub.liveSessions()[0]!.capabilities;
+    expect(caps['appium:app']).toBe('tb://solo-app');
+    expect(caps).not.toHaveProperty('appium:otherApps');
+
+    const worker = new TestingBotDriver({ ...driverOptions(), apps: { android: only } });
+    await worker.connect({ platform: 'android', deviceId: allocated.deviceId, deviceType: 'emulator' });
+    await expect(worker.installApp(only)).resolves.toBeUndefined();
 
     await driver.release(allocated.deviceId);
     await driver.dispose();
@@ -407,6 +432,34 @@ describe('sessionPerTest against FakeHub', () => {
     expect(throttleCalls.at(-1)!.args).toEqual(['disable']);
 
     await coordinator.release(allocated.deviceId);
+    await coordinator.dispose();
+  });
+
+  it('reuses the full app set (app + otherApps) when rotating sessions per test', async () => {
+    const main = join(tmpdir(), 'rot-main.apk');
+    const helper = join(tmpdir(), 'rot-helper.apk');
+    writeFileSync(main, Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.from('rot-main-bytes')]));
+    writeFileSync(helper, Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.from('rot-helper-bytes')]));
+    const apps = { android: [main, helper] };
+
+    const coordinator = new TestingBotDriver({ ...options(), apps });
+    await coordinator.prepare();
+    const allocated = await coordinator.allocate({ platform: 'android', deviceType: 'emulator' }, new Set());
+    expect(hub.uploadCount).toBe(2);
+
+    // A worker in another process rotates to a fresh session for its test:
+    // it must reuse the coordinator's uploads, not upload the binaries again.
+    const worker = new TestingBotDriver({ ...options(), apps });
+    await worker.connect({ platform: 'android', deviceId: allocated.deviceId, deviceType: 'emulator' });
+    await worker.disconnect();
+    await worker.connect({ platform: 'android', deviceId: allocated.deviceId, deviceType: 'emulator' });
+
+    expect(hub.uploadCount).toBe(2); // still just the two original uploads
+    const fresh = hub.liveSessions()[0]!.capabilities;
+    expect(fresh['appium:app']).toBe('tb://rot-main');
+    expect(fresh['appium:otherApps']).toEqual(['tb://rot-helper']);
+
+    await worker.disconnect();
     await coordinator.dispose();
   });
 });

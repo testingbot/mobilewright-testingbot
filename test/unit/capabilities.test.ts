@@ -134,4 +134,35 @@ describe('buildCapabilities', () => {
     expect(ios.alwaysMatch['appium:autoAcceptAlerts']).toBe(true);
     expect(ios.alwaysMatch['appium:autoGrantPermissions']).toBeUndefined();
   });
+
+  it('keeps the single-app (string) form working unchanged', () => {
+    const caps = buildCapabilities({ platform: 'android' }, options, undefined, ['tb://only']);
+    expect(caps.alwaysMatch['appium:app']).toBe('tb://only');
+    expect(caps.alwaysMatch).not.toHaveProperty('appium:otherApps');
+    // ...and a one-element array is exactly equivalent to the string form.
+    const single = appsForCriteria({ platform: 'android' }, { android: './a.apk' });
+    const listed = appsForCriteria({ platform: 'android' }, { android: ['./a.apk'] });
+    expect(single).toEqual(listed);
+  });
+
+  it('preserves order and mixes remote and local app entries', () => {
+    const apps = { android: ['tb://prebuilt', './local.apk', 'https://cdn.example/helper.apk'] };
+    expect(appsForCriteria({ platform: 'android' }, apps))
+      .toEqual(['tb://prebuilt', './local.apk', 'https://cdn.example/helper.apk']);
+  });
+
+  it('treats an empty or blank app list as no app at all', () => {
+    expect(appsForCriteria({ platform: 'android' }, { android: [] })).toEqual([]);
+    expect(appsForCriteria({ platform: 'android' }, { android: ['', './a.apk'] })).toEqual(['./a.apk']);
+    // No app and no browser must still fail loudly rather than reach the hub.
+    expect(() => buildCapabilities({ platform: 'android' }, options, undefined, []))
+      .toThrow(/must start with an app/);
+  });
+
+  it('prefers the device-type slot even when the platform slot is a list', () => {
+    const apps = { android: ['./generic.apk', './generic-helper.apk'], 'android-real': './device.apk' };
+    expect(appsForCriteria({ platform: 'android', deviceType: 'real' }, apps)).toEqual(['./device.apk']);
+    expect(appsForCriteria({ platform: 'android', deviceType: 'emulator' }, apps))
+      .toEqual(['./generic.apk', './generic-helper.apk']);
+  });
 });

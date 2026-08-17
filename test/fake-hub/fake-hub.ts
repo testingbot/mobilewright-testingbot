@@ -34,6 +34,8 @@ export class FakeHub {
   busyCount = 0;
   /** Number of app binaries uploaded to /v1/storage. */
   uploadCount = 0;
+  /** Storage keys handed out, in upload order. */
+  readonly uploadedKeys: string[] = [];
   /** The only package this fake device considers installed. */
   installedBundleId = 'com.example.installed';
   /** Simulate an installed app whose launcher activity cannot be resolved. */
@@ -198,7 +200,12 @@ export class FakeHub {
     }
     if (method === 'POST' && path === '/v1/storage') {
       this.uploadCount += 1;
-      return rest({ app_url: 'tb://fakeapp' }, 201);
+      // Derive a distinct key per binary from the multipart filename, so
+      // tests can tell the app under test from its helper apps.
+      const filename = raw.match(/filename="([^"]+)"/)?.[1] ?? `upload${this.uploadCount}`;
+      const key = filename.replace(/\.[^.]+$/, '').replace(/[^a-z0-9._-]/gi, '');
+      this.uploadedKeys.push(key);
+      return rest({ app_url: `tb://${key}` }, 201);
     }
     const storageMatch = path.match(/^\/v1\/storage\/([^/]+)$/);
     if (storageMatch) {
