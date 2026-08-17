@@ -13,7 +13,8 @@ const config: MobilewrightConfig = {
   timeout: 180_000,
   bundleId: process.env['E2E_BUNDLE_ID'] ?? 'com.mobilenext.Milliways',
   autoAppLaunch: false,
-  workers: 1,
+  fullyParallel: true,
+  workers: Number(process.env['E2E_WORKERS'] ?? 1),
   driver: new TestingBotDriver({
     build: `mobilewright-e2e-${process.env['GITHUB_RUN_ID'] ?? 'local'}`,
     // E2E_SESSION_PER_TEST=1 -> one TestingBot session/video/verdict per test
