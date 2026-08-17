@@ -227,6 +227,11 @@ describe('sessionPerTest against FakeHub', () => {
     await coordinator.dispose();
 
     // The observer reports the original AND the rotated session.
+    coordinator.observer!.onRunStart?.({ totalTests: 2 });
+    coordinator.observer!.onTestEnd?.(
+      { id: 't1', title: 'a test', titlePath: ['', 'ios', 'f', 'a test'] },
+      { status: 'passed', retry: 0, duration: 5, errors: [], steps: [] },
+    );
     await coordinator.observer!.onRunEnd?.({ status: 'passed', startTime: new Date(0), duration: 1 });
     expect(hub.testUpdates.get(allocated.deviceId)).toMatchObject({ 'test[success]': '1' });
     expect(hub.testUpdates.get(fresh.id)).toMatchObject({ 'test[success]': '1' });

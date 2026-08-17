@@ -49,6 +49,7 @@ describe('TestingBotTestObserver', () => {
     api.updateTest.mockRejectedValue(new Error('api down'));
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => { });
     const observer = new TestingBotTestObserver(api, { sessions: () => [{ sessionId: 's1', spans: 0 }] });
+    observer.onTestEnd(testInfo('a'), result('passed'));
     await expect(observer.onRunEnd(runEnd('passed'))).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
@@ -103,5 +104,13 @@ describe('TestingBotTestObserver', () => {
     const update = api.updateTest.mock.calls[0]![1];
     expect(update.name).toBeUndefined();
     expect(update.statusMessage).toBe('2/2 tests passed');
+  });
+
+  it('reports nothing when no test produced an outcome (test --list)', async () => {
+    const api = fakeApi();
+    const observer = new TestingBotTestObserver(api, { sessions: () => [{ sessionId: 'stale', spans: 1 }] });
+    observer.onRunStart({ totalTests: 3 }); // list mode still announces the suite
+    await observer.onRunEnd(runEnd('passed'));
+    expect(api.updateTest).not.toHaveBeenCalled();
   });
 });

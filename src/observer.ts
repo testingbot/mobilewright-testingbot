@@ -73,9 +73,10 @@ export class TestingBotTestObserver implements TestObserver {
   }
 
   async onRunEnd(result: RunResultInfo): Promise<void> {
-    if (this.totalTests === 0 && this.outcomes.size === 0) {
-      // Nothing ran (e.g. "mobilewright test --list" still fires reporter
-      // events) — don't report, especially not to stale run-file sessions.
+    if (this.outcomes.size === 0) {
+      // No test finished (e.g. "mobilewright test --list" fires onRunStart
+      // and onRunEnd without any tests running) — don't report, especially
+      // not to stale run-file sessions. Skipped tests still produce outcomes.
       return;
     }
     const success = result.status === 'passed';
