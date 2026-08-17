@@ -591,15 +591,53 @@ export class TestingBotDriver implements MobilewrightDriver {
     try {
       await this.hub.execute(sessionId, 'mobile: activateApp', [{ appId: bundleId, bundleId }]);
     } catch (err) {
-      if (err instanceof Error && /launchable activity|No activity found/i.test(err.message)) {
-        throw new Error(
-          `TestingBotDriver could not launch "${bundleId}": the app has no resolvable launcher activity. ` +
-          "Pass the activity explicitly — device.launchApp(bundleId, { activity: '.MainActivity' }) — or " +
-          'build the APK with a MAIN/LAUNCHER intent filter.\n' + err.message,
-        );
+      if (err instanceof Error && /launchable activity|No activity found|not installed/i.test(err.message)) {
+        throw await this.explainLaunchFailure(bundleId, err);
       }
       throw err;
     }
+  }
+
+  /**
+   * Appium reports a missing package and a missing launcher activity with the
+   * same "Unable to resolve the launchable activity" text. Ask the device
+   * which case it is: a bundleId that is simply not installed (the usual
+   * cause — the config's `bundleId` does not match the package id of the
+   * build in `apps`) deserves a completely different fix than a real
+   * launcher-activity problem.
+   */
+  private async explainLaunchFailure(bundleId: string, err: Error): Promise<Error> {
+    const session = this.session();
+    let installed: boolean | undefined;
+    try {
+      installed = await this.hub.execute<boolean>(session.sessionId, 'mobile: isAppInstalled', [
+        { appId: bundleId, bundleId },
+      ]);
+    } catch {
+      // Fall through with an unknown install state.
+    }
+
+    if (installed === false) {
+      const configured = appForCriteria(
+        { platform: session.platform, deviceType: session.deviceType },
+        this.options.apps,
+      );
+      return new Error(
+        `TestingBotDriver: "${bundleId}" is not installed on this device, so it cannot be launched. ` +
+        `The session was started with ${configured ? `"${configured}"` : 'the app from the driver\'s `apps` option'}` +
+        ` — make sure \`bundleId\` in your mobilewright config is that build's package id` +
+        (session.platform === 'android'
+          ? ' (check it with: aapt2 dump packagename app.apk).'
+          : ' (check it with: unzip -p app.ipa "Payload/*.app/Info.plist" | plutil -extract CFBundleIdentifier raw -).') +
+        `\n${err.message}`,
+      );
+    }
+
+    return new Error(
+      `TestingBotDriver could not launch "${bundleId}": the app is installed but has no resolvable ` +
+      "launcher activity. Pass one explicitly — device.launchApp(bundleId, { activity: '.MainActivity' }) — " +
+      'or build the app with a MAIN/LAUNCHER intent filter.\n' + err.message,
+    );
   }
 
   async terminateApp(bundleId: string): Promise<void> {

@@ -320,4 +320,24 @@ describe('sessionPerTest against FakeHub', () => {
     await worker.disconnect();
     await coordinator.dispose();
   });
+
+  it('explains a launch failure caused by a bundleId that is not installed', async () => {
+    const apps = { ios: 'tb://prebuilt-ios' } as const;
+    const coordinator = new TestingBotDriver({ ...options(), apps });
+    const allocated = await coordinator.allocate({ platform: 'ios', deviceType: 'simulator' }, new Set());
+    const worker = new TestingBotDriver({ ...options(), apps });
+    await worker.connect({ platform: 'ios', deviceId: allocated.deviceId, deviceType: 'simulator' });
+
+    // The config's bundleId does not match the installed build — the usual
+    // cause of Appium's misleading "launchable activity" error.
+    await expect(worker.launchApp('com.wrong.id')).rejects.toThrow(/is not installed on this device/);
+    await expect(worker.launchApp('com.wrong.id')).rejects.toThrow(/tb:\/\/prebuilt-ios/);
+
+    // A genuinely missing launcher activity keeps the other explanation.
+    hub.launcherActivityMissing = true;
+    await expect(worker.launchApp(hub.installedBundleId)).rejects.toThrow(/no resolvable launcher activity/);
+
+    await worker.disconnect();
+    await coordinator.dispose();
+  });
 });

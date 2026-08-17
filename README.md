@@ -173,6 +173,7 @@ jobs:
 | Allocation waits for minutes | The matching device is busy; TestingBot queues the session until it frees up (bounded by `allocationTimeout`). |
 | `Test timeout ... while setting up "device"` | More `workers` than your plan's parallel limit: TestingBot queues up to 2× the limit server-side and the driver waits out the rest, all inside the test-scoped device fixture. The driver warns with your plan's number — set `workers` to at most that, or raise the mobilewright `timeout`. |
 | `... is a simulator-only build and cannot be installed on a real device` | Build a test-signed `.ipa` for `deviceType: 'real'` projects. |
+| `"..." is not installed on this device` | The config's `bundleId` is not the package id of the build in `apps` (check with `aapt2 dump packagename app.apk`), or a stale `bundleId`/env override is in play. |
 | `cannot install "..." mid-session` | TestingBot has no mid-session installs — point `installApps` and the driver's `apps` at the same build. |
 | Modifier chords fail on iOS | XCUITest cannot hold modifier keys; chords are Android-only (`clearText()` handles iOS differently). |
 | Sessions show the run summary instead of a test name | The session hosted several tests; use `sessionPerTest: true` for guaranteed per-test naming. |

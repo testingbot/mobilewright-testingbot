@@ -34,6 +34,10 @@ export class FakeHub {
   busyCount = 0;
   /** Number of app binaries uploaded to /v1/storage. */
   uploadCount = 0;
+  /** The only package this fake device considers installed. */
+  installedBundleId = 'com.example.installed';
+  /** Simulate an installed app whose launcher activity cannot be resolved. */
+  launcherActivityMissing = false;
   /** Extra delay (ms) before answering POST /session. */
   allocationDelay = 0;
 
@@ -144,6 +148,19 @@ export class FakeHub {
             ]);
           }
           if (script.includes('document.readyState')) return wd('complete');
+          const appId = String((((body as { args?: Record<string, string>[] })?.args ?? [])[0])?.['appId'] ?? '');
+          if (script === 'mobile: isAppInstalled') {
+            return wd(appId === this.installedBundleId);
+          }
+          if (script === 'mobile: activateApp' && (appId !== this.installedBundleId || this.launcherActivityMissing)) {
+            // Verbatim shape of the real UiAutomator2 failure (captured live).
+            return wd({
+              error: 'unknown error',
+              message: `An unknown server-side error occurred while processing the command. ` +
+                `Original error: Unable to resolve the launchable activity of '${appId}'. ` +
+                `Original error: No activity found`,
+            }, 500);
+          }
           return wd(null);
         }
         case '/context':
