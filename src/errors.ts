@@ -85,3 +85,31 @@ export function toAllocationError(err: unknown): Error {
   }
   return err instanceof Error ? err : new Error(message);
 }
+
+// Actionable hints for known permanent hub failures, keyed by message pattern.
+const ALLOCATION_HINTS: [RegExp, string][] = [
+  [/Unknown browserName|we only serve/i,
+    "Make sure the app under test is declared via the driver's `apps` option — TestingBot sessions must start with an app or a browser."],
+  [/signature|provision|codesign|entitlement/i,
+    'Real iOS devices need a test-signed .ipa; simulator builds and unsigned archives cannot be installed on physical hardware.'],
+  [/appium.*version|version.*not supported/i,
+    'Pin a known-good version with the `appiumVersion` option (e.g. "latest" or "2.0").'],
+  [/invalid.*capabilit/i,
+    'Check the `capabilities` / `tbOptions` escape hatches for typos — they are merged into the session request as-is.'],
+];
+
+/**
+ * Wrap a permanent allocation failure with the criteria being allocated and
+ * an actionable hint when the hub message matches a known cause. Retriable
+ * errors pass through untouched — the pool needs the exact class.
+ */
+export function withAllocationContext(err: Error, criteriaDescription: string): Error {
+  if (err instanceof NoDeviceAvailableError) return err;
+  const hint = ALLOCATION_HINTS.find(([re]) => re.test(err.message))?.[1];
+  const wrapped = new Error(
+    `TestingBot could not start a session for ${criteriaDescription}: ${err.message}` +
+    (hint ? `\nHint: ${hint}` : ''),
+  );
+  wrapped.cause = err;
+  return wrapped;
+}

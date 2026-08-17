@@ -1,3 +1,5 @@
+import { detectCiBuild } from './ci.js';
+
 /**
  * Which allocations an app entry applies to. Specific keys win over
  * platform-wide ones ('ios-real' beats 'ios').
@@ -49,7 +51,12 @@ export interface TestingBotDriverOptions {
   appiumVersion?: string;
   /** Test name shown on the TestingBot dashboard (`tb:options.name`). */
   name?: string;
-  /** Build name for grouping sessions on the dashboard (`tb:options.build`). */
+  /**
+   * Build name for grouping sessions on the dashboard (`tb:options.build`).
+   * Defaults from the CI environment (GitHub Actions, GitLab, CircleCI,
+   * Buildkite, Bitrise, Travis, Azure, Jenkins, TeamCity — e.g.
+   * "owner/repo #123") or the TESTINGBOT_BUILD variable.
+   */
   build?: string;
   /** Device timezone (tz database name, e.g. "Europe/Brussels"). Default: "Etc/UTC". */
   timeZone?: string;
@@ -151,7 +158,7 @@ export function resolveOptions(options: TestingBotDriverOptions = {}): ResolvedO
     maxDuration: options.maxDuration,
     appiumVersion: options.appiumVersion,
     name: options.name,
-    build: options.build,
+    build: options.build ?? detectCiBuild(),
     timeZone: options.timeZone,
     geoCountryCode: options.geoCountryCode,
     throttleNetwork: options.throttleNetwork,

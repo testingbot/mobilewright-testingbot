@@ -36,7 +36,7 @@ import {
 import { AppStorage } from './app-storage.js';
 import { appForCriteria, buildCapabilities, type PinnedDevice } from './capabilities.js';
 import { DeviceCatalog } from './device-catalog.js';
-import { SessionNotActiveError, toAllocationError } from './errors.js';
+import { SessionNotActiveError, toAllocationError, withAllocationContext } from './errors.js';
 import { Keepalive } from './keepalive.js';
 import { parseChord, toAndroidKeyPress, toW3CKeyActions, typeTextActions } from './keys.js';
 import { TestingBotTestObserver } from './observer.js';
@@ -233,7 +233,7 @@ export class TestingBotDriver implements MobilewrightDriver {
           debug('allocation aborted while queued — hub dropped the pending request');
           throw new NoDeviceAvailableError('allocation aborted');
         }
-        throw toAllocationError(err);
+        throw withAllocationContext(toAllocationError(err), describeAllocation(criteria));
       } finally {
         signal?.removeEventListener('abort', onAbort);
       }
@@ -708,6 +708,16 @@ export class TestingBotDriver implements MobilewrightDriver {
 
 function str(value: unknown): string | undefined {
   return typeof value === 'string' && value ? value : undefined;
+}
+
+function describeAllocation(criteria: AllocationCriteria): string {
+  const parts = [
+    criteria.platform,
+    criteria.deviceType,
+    criteria.deviceNamePattern && `deviceName /${criteria.deviceNamePattern}/`,
+    criteria.osVersion && `osVersion "${criteria.osVersion}"`,
+  ].filter(Boolean);
+  return parts.length ? parts.join(', ') : 'the requested device';
 }
 
 /** Values usable directly as appium:app without an upload. */
