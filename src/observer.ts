@@ -73,6 +73,11 @@ export class TestingBotTestObserver implements TestObserver {
   }
 
   async onRunEnd(result: RunResultInfo): Promise<void> {
+    if (this.totalTests === 0 && this.outcomes.size === 0) {
+      // Nothing ran (e.g. "mobilewright test --list" still fires reporter
+      // events) — don't report, especially not to stale run-file sessions.
+      return;
+    }
     const success = result.status === 'passed';
     const outcomes = [...this.outcomes.values()];
     const failures = outcomes.filter((o) => o.failed).map((o) => o.summary).filter(Boolean).slice(0, 10);
