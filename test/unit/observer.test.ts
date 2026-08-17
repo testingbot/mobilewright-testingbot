@@ -16,7 +16,7 @@ function fakeApi() {
 describe('TestingBotTestObserver', () => {
   it('reports success to every allocated session on a passing run', async () => {
     const api = fakeApi();
-    const observer = new TestingBotTestObserver(api, { sessions: () => [{ sessionId: 's1' }, { sessionId: 's2' }], build: 'build-7' });
+    const observer = new TestingBotTestObserver(api, { sessions: () => [{ sessionId: 's1', spans: 0 }, { sessionId: 's2', spans: 0 }], build: 'build-7' });
     observer.onRunStart({ totalTests: 2 });
     observer.onTestEnd(testInfo('a'), result('passed'));
     observer.onTestEnd(testInfo('b'), result('passed'));
@@ -32,7 +32,7 @@ describe('TestingBotTestObserver', () => {
 
   it('reports failure with a compact summary of failing tests', async () => {
     const api = fakeApi();
-    const observer = new TestingBotTestObserver(api, { sessions: () => [{ sessionId: 's1' }] });
+    const observer = new TestingBotTestObserver(api, { sessions: () => [{ sessionId: 's1', spans: 0 }] });
     observer.onRunStart({ totalTests: 2 });
     observer.onTestEnd(testInfo('login works'), result('failed', ['Error: expected visible\n  at spec.ts:4']));
     observer.onTestEnd(testInfo('menu opens'), result('passed'));
@@ -48,7 +48,7 @@ describe('TestingBotTestObserver', () => {
     const api = fakeApi();
     api.updateTest.mockRejectedValue(new Error('api down'));
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => { });
-    const observer = new TestingBotTestObserver(api, { sessions: () => [{ sessionId: 's1' }] });
+    const observer = new TestingBotTestObserver(api, { sessions: () => [{ sessionId: 's1', spans: 0 }] });
     await expect(observer.onRunEnd(runEnd('passed'))).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
@@ -62,9 +62,9 @@ describe('TestingBotTestObserver', () => {
       // test's reported duration also covers fixture setup (allocation), so
       // each session interval is a narrow sub-interval of its test's.
       sessions: () => [
-        { sessionId: 'sess-pass', startedAt: now - 260_000, endedAt: now - 210_000 },
-        { sessionId: 'sess-fail', startedAt: now - 60_000, endedAt: now - 10_000 },
-        { sessionId: 'sess-untimed' },
+        { sessionId: 'sess-pass', spans: 1, startedAt: now - 260_000, endedAt: now - 210_000 },
+        { sessionId: 'sess-fail', spans: 1, startedAt: now - 60_000, endedAt: now - 10_000 },
+        { sessionId: 'sess-untimed', spans: 0 },
       ],
     });
     observer.onRunStart({ totalTests: 2 });
@@ -87,5 +87,21 @@ describe('TestingBotTestObserver', () => {
     // Untimed session (reused pool session) gets the run verdict, no test name.
     expect(updates.get('sess-untimed')!.success).toBe(false);
     expect(updates.get('sess-untimed')!.name).toBeUndefined();
+  });
+
+  it('keeps the run verdict for a pooled session that hosted several tests', async () => {
+    const api = fakeApi();
+    const now = Date.now();
+    const observer = new TestingBotTestObserver(api, {
+      // Two connect/disconnect cycles merged into one record: spans=2.
+      sessions: () => [{ sessionId: 'shared', spans: 2, startedAt: now - 300_000, endedAt: now }],
+    });
+    observer.onRunStart({ totalTests: 2 });
+    observer.onTestEnd(testInfo('a'), result('passed'));
+    observer.onTestEnd(testInfo('b'), result('passed'));
+    await observer.onRunEnd(runEnd('passed'));
+    const update = api.updateTest.mock.calls[0]![1];
+    expect(update.name).toBeUndefined();
+    expect(update.statusMessage).toBe('2/2 tests passed');
   });
 });

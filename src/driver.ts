@@ -138,7 +138,7 @@ export class TestingBotDriver implements MobilewrightDriver {
         // a timed worker record wins over the coordinator's untimed one.
         sessions: () => {
           const byId = new Map(
-            [...this.everAllocated.keys()].map((sessionId) => [sessionId, { sessionId }]),
+            [...this.everAllocated.keys()].map((sessionId) => [sessionId, { sessionId, spans: 0 }]),
           );
           for (const record of this.runLog.sessions()) byId.set(record.sessionId, record);
           return [...byId.values()];
@@ -335,9 +335,18 @@ export class TestingBotDriver implements MobilewrightDriver {
   async disconnect(): Promise<void> {
     const session = this.active;
     this.active = undefined;
-    if (!this.options.sessionPerTest || !session) {
+    if (!session) return;
+    if (!this.options.sessionPerTest) {
       // Soft detach only: the pool re-grants this slot to the next test and
-      // ends the session via release().
+      // ends the session via release(). Still record this test's interval —
+      // a pooled session that hosted exactly one test can then be renamed to
+      // that test at run end.
+      this.runLog.append({
+        type: 'session',
+        sessionId: session.sessionId,
+        startedAt: session.connectedAt,
+        endedAt: Date.now(),
+      });
       return;
     }
     // sessionPerTest: this test's session ends here; the next connect starts

@@ -30,6 +30,14 @@ export interface AppRecord {
 
 type Record_ = SessionRecord | AppRecord;
 
+export interface MergedSession {
+  sessionId: string;
+  /** Number of connect/disconnect cycles (= tests) recorded for this session. */
+  spans: number;
+  startedAt?: number;
+  endedAt?: number;
+}
+
 export class RunLog {
   readonly path: string;
 
@@ -65,14 +73,24 @@ export class RunLog {
     }
   }
 
-  /** Session records, deduplicated by id — a timed record (written at test
-   *  end) wins over an untimed one (written at session start). */
-  sessions(): SessionRecord[] {
-    const byId = new Map<string, SessionRecord>();
+  /**
+   * Session records merged by id. A pooled session hosts one test per
+   * connect/disconnect cycle, so it accumulates one timed record per test:
+   * `spans` counts them, and startedAt/endedAt cover their union. A session
+   * with exactly one span hosted exactly one test — attributable; more than
+   * one span means several tests shared it.
+   */
+  sessions(): MergedSession[] {
+    const byId = new Map<string, MergedSession>();
     for (const record of this.read()) {
       if (record.type !== 'session') continue;
-      const existing = byId.get(record.sessionId);
-      if (!existing || record.endedAt !== undefined) byId.set(record.sessionId, record);
+      const merged = byId.get(record.sessionId) ?? { sessionId: record.sessionId, spans: 0 };
+      if (record.startedAt !== undefined && record.endedAt !== undefined) {
+        merged.spans += 1;
+        merged.startedAt = Math.min(merged.startedAt ?? record.startedAt, record.startedAt);
+        merged.endedAt = Math.max(merged.endedAt ?? record.endedAt, record.endedAt);
+      }
+      byId.set(record.sessionId, merged);
     }
     return [...byId.values()];
   }

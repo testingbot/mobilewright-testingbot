@@ -12,7 +12,9 @@ const debug = createDebug('testingbot:observer');
 
 export interface ReportableSession {
   sessionId: string;
-  /** Wall-clock bounds of the session, when known (sessionPerTest). */
+  /** Connect/disconnect cycles (= tests) recorded for this session. */
+  spans: number;
+  /** Wall-clock bounds of the recorded cycles, when any exist. */
   startedAt?: number;
   endedAt?: number;
 }
@@ -114,6 +116,8 @@ export class TestingBotTestObserver implements TestObserver {
    * therefore be looked up in the test intervals, never the other way around.
    */
   private testForSession(session: ReportableSession, outcomes: TestOutcome[]): TestOutcome | undefined {
+    // A session that hosted several tests has no single correct name/verdict.
+    if (session.spans !== 1) return undefined;
     if (session.startedAt === undefined || session.endedAt === undefined) return undefined;
     const midpoint = (session.startedAt + session.endedAt) / 2;
     // Clock skew tolerance between the worker's stamps and ours.
