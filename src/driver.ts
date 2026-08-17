@@ -43,6 +43,7 @@ import { TestingBotTestObserver } from './observer.js';
 import { requireCredentials, resolveOptions, type ResolvedOptions, type TestingBotDriverOptions } from './options.js';
 import { RestApiClient, type UserInfo } from './rest-api.js';
 import { RunLog } from './run-log.js';
+import { setActiveDriver, type ThrottlePreset, type ThrottleProfile } from './session-commands.js';
 import { TunnelManager } from './tunnel.js';
 import { AppiumWebViewBridge } from './webview.js';
 import { WebDriverClient } from './webdriver-client.js';
@@ -65,6 +66,8 @@ interface ActiveSession {
   screenSize?: ScreenSize;
   /** Wall-clock ms of connect(); brackets the test in sessionPerTest mode. */
   connectedAt: number;
+  /** Set once tb:throttle applied non-default conditions in this test. */
+  throttled?: boolean;
 }
 
 const ANDROID_BUTTON_KEYCODES: Record<HardwareButton, number> = {
@@ -326,6 +329,7 @@ export class TestingBotDriver implements MobilewrightDriver {
       // Liveness probe — also validates the id belongs to a live TB session.
       await this.hub.get(poolDeviceId, '/orientation', { timeout });
       this.active = { sessionId: poolDeviceId, platform: config.platform, deviceType: config.deviceType, connectedAt: Date.now() };
+      setActiveDriver(this);
       debug('connected to session %s', poolDeviceId);
       return { deviceId: poolDeviceId, platform: config.platform };
     }
@@ -347,6 +351,7 @@ export class TestingBotDriver implements MobilewrightDriver {
     }
     sessionId ??= await this.startFreshSession(config);
     this.active = { sessionId, platform: config.platform, deviceType: config.deviceType, connectedAt: Date.now() };
+    setActiveDriver(this);
     debug('connected to session %s (slot %s)', sessionId, poolDeviceId);
     return { deviceId: poolDeviceId, platform: config.platform };
   }
@@ -354,7 +359,15 @@ export class TestingBotDriver implements MobilewrightDriver {
   async disconnect(): Promise<void> {
     const session = this.active;
     this.active = undefined;
+    setActiveDriver(undefined);
     if (!session) return;
+    if (session.throttled) {
+      // A pooled session outlives the test: reset network conditions so they
+      // cannot leak into whichever test gets this slot next.
+      await this.hub.execute(session.sessionId, 'tb:throttle', ['disable']).catch((err) => {
+        debug('could not reset throttling on %s: %s', session.sessionId, err);
+      });
+    }
     if (!this.options.sessionPerTest) {
       // Soft detach only: the pool re-grants this slot to the next test and
       // ends the session via release(). Still record this test's interval —
@@ -412,6 +425,27 @@ export class TestingBotDriver implements MobilewrightDriver {
     this.runLog.append({ type: 'session', sessionId });
     debug('started per-test session %s — https://testingbot.com/members/tests/%s', sessionId, sessionId);
     return sessionId;
+  }
+
+  // ─── TestingBot-specific session commands ─────────────────────
+
+  /** Run any Appium/TestingBot execute-script command on the live session. */
+  async executeScript<T = unknown>(script: string, ...args: unknown[]): Promise<T> {
+    return await this.hub.execute<T>(this.session().sessionId, script, args);
+  }
+
+  /** WebDriver session id of the device this instance is connected to. */
+  currentSessionId(): string {
+    return this.session().sessionId;
+  }
+
+  /** `tb:throttle` — change network conditions mid-test. */
+  async throttle(conditions: ThrottlePreset | ThrottleProfile): Promise<void> {
+    const session = this.session();
+    await this.hub.execute(session.sessionId, 'tb:throttle', [conditions]);
+    const off = conditions === 'disable' || (typeof conditions === 'object' && conditions.disable === true);
+    session.throttled = !off;
+    debug('throttle %o applied to %s', conditions, session.sessionId);
   }
 
   // ─── MobilewrightSession: device settings ──────────────────────

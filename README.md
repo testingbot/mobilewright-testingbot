@@ -128,6 +128,41 @@ new TestingBotDriver({
 });
 ```
 
+## TestingBot commands inside tests
+
+Some TestingBot features are runtime commands rather than session capabilities.
+Import the `testingbot` helper and call them from a test body — it targets the
+device session mobilewright connected for that test:
+
+```ts
+import { test, expect } from '@mobilewright/test';
+import { testingbot } from '@testingbot/mobilewright-driver';
+
+test('checkout survives a slow network', async ({ device, screen, bundleId }) => {
+  await device.launchApp(bundleId);
+
+  await testingbot.throttle('3G');            // 'Edge' | '3G' | '4G' | 'airplane' | 'disable'
+  await expect(screen.getByText('Order placed')).toBeVisible();
+  await testingbot.throttle('disable');       // optional — see below
+
+  // custom conditions
+  await testingbot.throttle({ downloadSpeed: 10 * 1024, uploadSpeed: 10 * 1024, latency: 200, loss: 0 });
+
+  // Android ADB shell (whitelisted subset on physical devices)
+  await testingbot.shell('input', ['keyevent', '3']);
+
+  // any other Appium / TestingBot execute-script command
+  await testingbot.execute('mobile: deepLink', { url: 'myapp://cart' });
+
+  console.log('session:', testingbot.dashboardUrl());
+});
+```
+
+Throttling is **reset automatically** when the test's device session is
+released, so slow-network conditions never leak into the next test that reuses
+the device. Calling a command outside a test body raises an explanatory error
+rather than a null-reference.
+
 ## Testing localhost / staging servers (TestingBot Tunnel)
 
 Either run a [TestingBot Tunnel](https://testingbot.com/support/tunnel) yourself and pass its identifier:

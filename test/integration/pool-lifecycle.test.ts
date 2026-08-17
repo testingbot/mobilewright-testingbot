@@ -340,4 +340,44 @@ describe('sessionPerTest against FakeHub', () => {
     await worker.disconnect();
     await coordinator.dispose();
   });
+
+  it('exposes TestingBot commands to test code and resets throttling at the test boundary', async () => {
+    const { testingbot } = await import('../../src/session-commands.js');
+    const apps = { android: 'tb://prebuilt-android' } as const;
+    const coordinator = new TestingBotDriver({ ...options(), apps });
+    const allocated = await coordinator.allocate({ platform: 'android', deviceType: 'emulator' }, new Set());
+    const worker = new TestingBotDriver({ ...options(), apps });
+
+    // Outside a session the helper explains itself instead of throwing TypeErrors.
+    await expect(testingbot.throttle('3G')).rejects.toThrow(/needs a connected device session/);
+
+    await worker.connect({ platform: 'android', deviceId: allocated.deviceId, deviceType: 'emulator' });
+    expect(testingbot.sessionId()).toBe(allocated.deviceId);
+    expect(testingbot.dashboardUrl()).toContain(allocated.deviceId);
+
+    await testingbot.throttle('3G');
+    await testingbot.shell('input', ['keyevent', '3']);
+    await testingbot.execute('mobile: getCurrentPackage');
+
+    const scripts = hub.requests
+      .filter((r) => r.path.endsWith('/execute/sync'))
+      .map((r) => (r.body as { script: string; args: unknown[] }));
+    expect(scripts.map((s) => s.script)).toEqual(
+      expect.arrayContaining(['tb:throttle', 'mobile: shell', 'mobile: getCurrentPackage']),
+    );
+    expect(scripts.find((s) => s.script === 'tb:throttle')!.args).toEqual(['3G']);
+    expect(scripts.find((s) => s.script === 'mobile: shell')!.args)
+      .toEqual([{ command: 'input', args: ['keyevent', '3'] }]);
+
+    // Pooled sessions outlive the test — throttling must not leak forward.
+    await worker.disconnect();
+    const throttleCalls = hub.requests
+      .filter((r) => r.path.endsWith('/execute/sync'))
+      .map((r) => (r.body as { script: string; args: unknown[] }))
+      .filter((s) => s.script === 'tb:throttle');
+    expect(throttleCalls.at(-1)!.args).toEqual(['disable']);
+
+    await coordinator.release(allocated.deviceId);
+    await coordinator.dispose();
+  });
 });
