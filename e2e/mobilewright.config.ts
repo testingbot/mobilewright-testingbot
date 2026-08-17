@@ -16,6 +16,8 @@ const config: MobilewrightConfig = {
   workers: 1,
   driver: new TestingBotDriver({
     build: `mobilewright-e2e-${process.env['GITHUB_RUN_ID'] ?? 'local'}`,
+    // E2E_SESSION_PER_TEST=1 -> one TestingBot session/video/verdict per test
+    sessionPerTest: process.env['E2E_SESSION_PER_TEST'] === '1',
     // TestingBot sessions must start with the app — same builds as installApps below.
     apps: {
       android: process.env['E2E_APK'] ?? '../milliways/android/build/Milliways.apk',
