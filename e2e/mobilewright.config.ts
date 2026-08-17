@@ -19,6 +19,12 @@ const config: MobilewrightConfig = {
     build: `mobilewright-e2e-${process.env['GITHUB_RUN_ID'] ?? 'local'}`,
     // E2E_SESSION_PER_TEST=1 -> one TestingBot session/video/verdict per test
     sessionPerTest: process.env['E2E_SESSION_PER_TEST'] === '1',
+    // E2E_TUNNEL=1 -> driver-managed TestingBot Tunnel around the run.
+    // The identifier must be stable across processes (the config is imported
+    // in workers too, and their session caps must name the same tunnel).
+    ...(process.env['E2E_TUNNEL'] === '1'
+      ? { tunnel: { identifier: 'mobilewright-e2e' } }
+      : {}),
     // TestingBot sessions must start with the app — same builds as installApps below.
     apps: {
       android: process.env['E2E_APK'] ?? '../milliways/android/build/Milliways.apk',

@@ -9,5 +9,8 @@
     "@mobilewright/test": "^0.0.53",
     "@testingbot/mobilewright-driver": "file:..",
     "mobilewright": "^0.0.53"
+  },
+  "devDependencies": {
+    "testingbot-tunnel-launcher": "^1.1.18"
   }
 }
