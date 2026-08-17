@@ -21,8 +21,13 @@ export interface TestingBotDriverOptions {
    * existing storage URLs ("tb://...").
    *
    *   apps: { android: './build/app.apk', 'ios-simulator': './build/app.zip', 'ios-real': './build/app.ipa' }
+   *
+   * Pass an array to install helper apps alongside the app under test (they
+   * ride along as `appium:otherApps`); the FIRST entry is the app under test:
+   *
+   *   apps: { android: ['./build/app.apk', './build/mock-server.apk'] }
    */
-  apps?: Partial<Record<AppSlot, string>>;
+  apps?: Partial<Record<AppSlot, string | string[]>>;
   /** TestingBot API key. Default: TESTINGBOT_KEY (or TB_KEY) env variable. */
   key?: string;
   /** TestingBot API secret. Default: TESTINGBOT_SECRET (or TB_SECRET) env variable. */
@@ -112,7 +117,7 @@ export interface TestingBotDriverOptions {
 }
 
 export interface ResolvedOptions {
-  apps: Partial<Record<AppSlot, string>>;
+  apps: Partial<Record<AppSlot, string | string[]>>;
   key: string;
   secret: string;
   hubUrl: string;

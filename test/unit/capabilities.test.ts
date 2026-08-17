@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { appForCriteria, buildCapabilities } from '../../src/capabilities.js';
+import { appsForCriteria, buildCapabilities } from '../../src/capabilities.js';
 import { resolveOptions } from '../../src/options.js';
 
 const options = resolveOptions({ key: 'k', secret: 's' });
@@ -10,7 +10,7 @@ describe('buildCapabilities', () => {
   });
 
   it('builds android emulator caps by default', () => {
-    const caps = buildCapabilities({ platform: 'android' }, options, undefined, 'tb://app');
+    const caps = buildCapabilities({ platform: 'android' }, options, undefined, ['tb://app']);
     expect(caps.alwaysMatch).toMatchObject({
       platformName: 'Android',
       'appium:automationName': 'UiAutomator2',
@@ -31,7 +31,7 @@ describe('buildCapabilities', () => {
       { platform: 'ios', deviceType: 'real', osVersion: '>=17' },
       options,
       { deviceName: 'iPhone 15', platformVersion: '17.4' },
-      'tb://app',
+      ['tb://app'],
     );
     expect(caps.alwaysMatch).toMatchObject({
       platformName: 'iOS',
@@ -43,11 +43,11 @@ describe('buildCapabilities', () => {
   });
 
   it('forwards plain osVersion for virtual devices but rejects ranges', () => {
-    const caps = buildCapabilities({ platform: 'ios', deviceType: 'simulator', osVersion: '17.0' }, options, undefined, 'tb://app');
+    const caps = buildCapabilities({ platform: 'ios', deviceType: 'simulator', osVersion: '17.0' }, options, undefined, ['tb://app']);
     expect(caps.alwaysMatch['appium:platformVersion']).toBe('17.0');
     expect(caps.alwaysMatch['appium:app']).toBe('tb://app');
     expect(() =>
-      buildCapabilities({ platform: 'ios', deviceType: 'simulator', osVersion: '>=17 <19' }, options, undefined, 'tb://app'),
+      buildCapabilities({ platform: 'ios', deviceType: 'simulator', osVersion: '>=17 <19' }, options, undefined, ['tb://app']),
     ).toThrow(/cannot resolve the osVersion range/);
   });
 
@@ -58,12 +58,22 @@ describe('buildCapabilities', () => {
     expect(() => buildCapabilities({ platform: 'android' }, withBrowser)).not.toThrow();
   });
 
-  it('appForCriteria picks the most specific slot', () => {
-    const apps = { ios: './generic.ipa', 'ios-simulator': './sim.zip', android: './app.apk' } as const;
-    expect(appForCriteria({ platform: 'ios', deviceType: 'simulator' }, apps)).toBe('./sim.zip');
-    expect(appForCriteria({ platform: 'ios', deviceType: 'real' }, apps)).toBe('./generic.ipa');
-    expect(appForCriteria({ platform: 'android', deviceType: 'emulator' }, apps)).toBe('./app.apk');
-    expect(appForCriteria({ platform: 'android' }, {})).toBeUndefined();
+  it('appsForCriteria picks the most specific slot and normalizes to a list', () => {
+    const apps = { ios: './generic.ipa', 'ios-simulator': './sim.zip', android: ['./app.apk', './helper.apk'] };
+    expect(appsForCriteria({ platform: 'ios', deviceType: 'simulator' }, apps)).toEqual(['./sim.zip']);
+    expect(appsForCriteria({ platform: 'ios', deviceType: 'real' }, apps)).toEqual(['./generic.ipa']);
+    expect(appsForCriteria({ platform: 'android', deviceType: 'emulator' }, apps)).toEqual(['./app.apk', './helper.apk']);
+    expect(appsForCriteria({ platform: 'android' }, {})).toEqual([]);
+  });
+
+  it('sends helper apps as appium:otherApps, app under test first', () => {
+    const caps = buildCapabilities({ platform: 'android' }, options, undefined,
+      ['tb://main', 'tb://helper', 'tb://mock']);
+    expect(caps.alwaysMatch['appium:app']).toBe('tb://main');
+    expect(caps.alwaysMatch['appium:otherApps']).toEqual(['tb://helper', 'tb://mock']);
+    // A single app must not add an empty otherApps list.
+    const single = buildCapabilities({ platform: 'android' }, options, undefined, ['tb://main']);
+    expect(single.alwaysMatch['appium:otherApps']).toBeUndefined();
   });
 
   it('merges user capabilities and tbOptions last as an escape hatch', () => {
@@ -72,7 +82,7 @@ describe('buildCapabilities', () => {
       capabilities: { 'appium:autoGrantPermissions': true },
       tbOptions: { timeZone: 'Europe/Brussels', idletimeout: 500 },
     });
-    const caps = buildCapabilities({ platform: 'android' }, custom, undefined, 'tb://app');
+    const caps = buildCapabilities({ platform: 'android' }, custom, undefined, ['tb://app']);
     expect(caps.alwaysMatch['appium:autoGrantPermissions']).toBe(true);
     expect(caps.alwaysMatch['tb:options']).toMatchObject({ timeZone: 'Europe/Brussels', idletimeout: 500 });
   });
@@ -91,7 +101,7 @@ describe('buildCapabilities', () => {
       phoneOnly: true,
       tunnelIdentifier: 'ci-42',
     });
-    const caps = buildCapabilities({ platform: 'android' }, opts, undefined, 'tb://app');
+    const caps = buildCapabilities({ platform: 'android' }, opts, undefined, ['tb://app']);
     expect(caps.alwaysMatch['tb:options']).toMatchObject({
       timeZone: 'Europe/Brussels',
       'testingbot.geoCountryCode': 'DE',
@@ -117,10 +127,10 @@ describe('buildCapabilities', () => {
 
   it('maps popup-handling options to the right platform only', () => {
     const opts = resolveOptions({ key: 'k', secret: 's', autoGrantPermissions: true, autoAcceptAlerts: true });
-    const android = buildCapabilities({ platform: 'android' }, opts, undefined, 'tb://app');
+    const android = buildCapabilities({ platform: 'android' }, opts, undefined, ['tb://app']);
     expect(android.alwaysMatch['appium:autoGrantPermissions']).toBe(true);
     expect(android.alwaysMatch['appium:autoAcceptAlerts']).toBeUndefined();
-    const ios = buildCapabilities({ platform: 'ios' }, opts, undefined, 'tb://app');
+    const ios = buildCapabilities({ platform: 'ios' }, opts, undefined, ['tb://app']);
     expect(ios.alwaysMatch['appium:autoAcceptAlerts']).toBe(true);
     expect(ios.alwaysMatch['appium:autoGrantPermissions']).toBeUndefined();
   });

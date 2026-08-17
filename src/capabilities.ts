@@ -22,30 +22,30 @@ const REGEX_METACHARS = /[.*+?^${}()|[\]\\]/;
  * ('ios-real' beats 'ios'). Returns the raw configured value: a local path
  * or a tb:// / https URL (the caller uploads local paths).
  */
-export function appForCriteria(
+export function appsForCriteria(
   criteria: Pick<AllocationCriteria, 'platform' | 'deviceType'>,
-  apps: Partial<Record<AppSlot, string>>,
-): string | undefined {
+  apps: Partial<Record<AppSlot, string | string[]>>,
+): string[] {
   const platform = criteria.platform;
-  if (!platform) return undefined;
-  if (criteria.deviceType) {
-    const specific = apps[`${platform}-${criteria.deviceType}` as AppSlot];
-    if (specific) return specific;
-  }
-  return apps[platform];
+  if (!platform) return [];
+  const specific = criteria.deviceType ? apps[`${platform}-${criteria.deviceType}` as AppSlot] : undefined;
+  const configured = specific ?? apps[platform];
+  if (!configured) return [];
+  return Array.isArray(configured) ? configured.filter(Boolean) : [configured];
 }
 
 /**
  * Build the W3C new-session payload for a set of allocation criteria.
  * Pure — catalog lookups and app uploads happen in the caller; a pinned
  * device (real-device allocations) overrides name/version wildcards, and
- * `appUrl` is the already-uploaded app under test (tb:// or https).
+ * `appUrls` are the already-uploaded apps (tb:// or https): the first is the
+ * app under test, any others ride along as `appium:otherApps`.
  */
 export function buildCapabilities(
   criteria: AllocationCriteria,
   options: ResolvedOptions,
   pinned?: PinnedDevice,
-  appUrl?: string,
+  appUrls: string[] = [],
 ): W3CCapabilities {
   const platform = criteria.platform;
   if (!platform) {
@@ -62,7 +62,11 @@ export function buildCapabilities(
     platformName: platform === 'ios' ? 'iOS' : 'Android',
     'appium:automationName': platform === 'ios' ? 'XCUITest' : 'UiAutomator2',
   };
+  const [appUrl, ...otherApps] = appUrls;
   if (appUrl) caps['appium:app'] = appUrl;
+  // TestingBot installs these alongside the app under test (and re-signs them
+  // for real iOS devices).
+  if (otherApps.length) caps['appium:otherApps'] = otherApps;
 
   // TestingBot has no app-less sessions: every session must start with an
   // app or a browser. Fail here with guidance instead of a cryptic hub error.

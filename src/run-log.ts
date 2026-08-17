@@ -25,7 +25,8 @@ export interface AppRecord {
   type: 'app';
   platform: string;
   deviceType?: string;
-  url: string;
+  /** Uploaded app URLs: app under test first, then any otherApps. */
+  urls: string[];
 }
 
 export interface RecordingRecord {
@@ -110,11 +111,11 @@ export class RunLog {
     return this.read().filter((r): r is RecordingRecord => r.type === 'recording');
   }
 
-  appUrlFor(platform: string, deviceType: string | undefined): string | undefined {
+  appUrlsFor(platform: string, deviceType: string | undefined): string[] | undefined {
     const apps = this.read().filter((r): r is AppRecord => r.type === 'app');
     return (
       apps.find((a) => a.platform === platform && a.deviceType === deviceType) ??
       apps.find((a) => a.platform === platform)
-    )?.url;
+    )?.urls;
   }
 }

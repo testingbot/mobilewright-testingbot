@@ -153,6 +153,35 @@ describe('pool lifecycle against FakeHub', () => {
     await driver.dispose();
   });
 
+  it('installs helper apps as appium:otherApps and accepts them from installApps', async () => {
+    const main = join(tmpdir(), 'multi-main.apk');
+    const helper = join(tmpdir(), 'multi-helper.apk');
+    writeFileSync(main, Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.from('main-bytes')]));
+    writeFileSync(helper, Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.from('helper-bytes')]));
+    const apps = { android: [main, helper] };
+
+    const driver = new TestingBotDriver({ ...driverOptions(), apps });
+    const allocated = await driver.allocate({ platform: 'android', deviceType: 'emulator' }, new Set());
+    expect(hub.uploadCount).toBe(2); // both binaries uploaded once
+    const caps = hub.liveSessions()[0]!.capabilities;
+    expect(caps['appium:app']).toBe('tb://fakeapp');
+    expect(caps['appium:otherApps']).toEqual(['tb://fakeapp']); // FakeHub returns one key for both
+
+    // mobilewright calls installApp for every installApps entry — each of the
+    // declared apps must be accepted as already installed.
+    const worker = new TestingBotDriver({ ...driverOptions(), apps });
+    await worker.connect({ platform: 'android', deviceId: allocated.deviceId, deviceType: 'emulator' });
+    await expect(worker.installApp(main)).resolves.toBeUndefined();
+    await expect(worker.installApp(helper)).resolves.toBeUndefined();
+
+    const stranger = join(tmpdir(), 'multi-stranger.apk');
+    writeFileSync(stranger, Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.from('stranger')]));
+    await expect(worker.installApp(stranger)).rejects.toThrow(/cannot install .* mid-session/);
+
+    await driver.release(allocated.deviceId);
+    await driver.dispose();
+  });
+
   it('rejects allocation without a configured app', async () => {
     const driver = new TestingBotDriver({ ...driverOptions(), apps: {} });
     await expect(driver.allocate({ platform: 'ios' }, new Set())).rejects.toThrow(/must start with an app/);

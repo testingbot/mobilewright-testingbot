@@ -34,7 +34,7 @@ import {
   tapActions,
 } from './actions.js';
 import { AppStorage } from './app-storage.js';
-import { appForCriteria, buildCapabilities, type PinnedDevice } from './capabilities.js';
+import { appsForCriteria, buildCapabilities, type PinnedDevice } from './capabilities.js';
 import { DeviceCatalog } from './device-catalog.js';
 import { SessionNotActiveError, toAllocationError, withAllocationContext } from './errors.js';
 import { Keepalive } from './keepalive.js';
@@ -202,20 +202,20 @@ export class TestingBotDriver implements MobilewrightDriver {
 
     // TestingBot sessions must start with an app — resolve and upload the
     // configured one now so it can ride along in the allocation caps.
-    let appUrl: string | undefined;
-    const configuredApp = appForCriteria(criteria, this.options.apps);
-    if (configuredApp) {
-      appUrl = isRemoteApp(configuredApp)
-        ? configuredApp
-        : (await this.storage.ensureUploaded(configuredApp, criteria.deviceType)).app_url;
-      if (this.options.sessionPerTest && criteria.platform) {
-        // Workers rotating sessions per test reuse this upload instead of
-        // re-uploading the binary once per worker process.
-        this.runLog.append({ type: 'app', platform: criteria.platform, deviceType: criteria.deviceType, url: appUrl });
-      }
+    const configuredApps = appsForCriteria(criteria, this.options.apps);
+    const appUrls: string[] = [];
+    for (const app of configuredApps) {
+      appUrls.push(isRemoteApp(app)
+        ? app
+        : (await this.storage.ensureUploaded(app, criteria.deviceType)).app_url);
+    }
+    if (appUrls.length && this.options.sessionPerTest && criteria.platform) {
+      // Workers rotating sessions per test reuse these uploads instead of
+      // re-uploading the binaries once per worker process.
+      this.runLog.append({ type: 'app', platform: criteria.platform, deviceType: criteria.deviceType, urls: appUrls });
     }
 
-    const capabilities = buildCapabilities(criteria, this.options, pinned, appUrl);
+    const capabilities = buildCapabilities(criteria, this.options, pinned, appUrls);
     debug('allocating: %o', { ...capabilities.alwaysMatch, 'tb:options': '[redacted]' });
 
     if (signal?.aborted) {
@@ -411,16 +411,16 @@ export class TestingBotDriver implements MobilewrightDriver {
       pinned = await this.catalog.pickVirtualDevice(criteria);
     }
     // Prefer the app the coordinator already uploaded for this platform.
-    let appUrl = criteria.platform ? this.runLog.appUrlFor(criteria.platform, criteria.deviceType) : undefined;
-    if (!appUrl) {
-      const configuredApp = appForCriteria(criteria, this.options.apps);
-      if (configuredApp) {
-        appUrl = isRemoteApp(configuredApp)
-          ? configuredApp
-          : (await this.storage.ensureUploaded(configuredApp, criteria.deviceType)).app_url;
+    let appUrls = criteria.platform ? this.runLog.appUrlsFor(criteria.platform, criteria.deviceType) : undefined;
+    if (!appUrls?.length) {
+      appUrls = [];
+      for (const app of appsForCriteria(criteria, this.options.apps)) {
+        appUrls.push(isRemoteApp(app)
+          ? app
+          : (await this.storage.ensureUploaded(app, criteria.deviceType)).app_url);
       }
     }
-    const capabilities = buildCapabilities(criteria, this.options, pinned, appUrl);
+    const capabilities = buildCapabilities(criteria, this.options, pinned, appUrls);
     const { sessionId } = await this.hub.newSession(capabilities, { timeout: this.options.allocationTimeout });
     this.runLog.append({ type: 'session', sessionId });
     debug('started per-test session %s — https://testingbot.com/members/tests/%s', sessionId, sessionId);
@@ -652,13 +652,13 @@ export class TestingBotDriver implements MobilewrightDriver {
     }
 
     if (installed === false) {
-      const configured = appForCriteria(
+      const configured = appsForCriteria(
         { platform: session.platform, deviceType: session.deviceType },
         this.options.apps,
-      );
+      ).map((a) => `"${a}"`).join(', ');
       return new Error(
         `TestingBotDriver: "${bundleId}" is not installed on this device, so it cannot be launched. ` +
-        `The session was started with ${configured ? `"${configured}"` : 'the app from the driver\'s `apps` option'}` +
+        `The session was started with ${configured || 'the app from the driver\'s `apps` option'}` +
         ` — make sure \`bundleId\` in your mobilewright config is that build's package id` +
         (session.platform === 'android'
           ? ' (check it with: aapt2 dump packagename app.apk).'
@@ -710,19 +710,22 @@ export class TestingBotDriver implements MobilewrightDriver {
     // at allocation time via appium:app (declared in the driver's `apps`
     // option). This call only verifies the request matches that app.
     const session = this.session();
-    const declared = appForCriteria(
+    const declared = appsForCriteria(
       { platform: session.platform, deviceType: session.deviceType },
       this.options.apps,
     );
-    if (declared && (isRemoteApp(declared) || await sameFileContents(declared, path))) {
-      debug('installApp(%s): already installed at allocation via appium:app, skipping', path);
-      return;
+    for (const app of declared) {
+      if (isRemoteApp(app) || await sameFileContents(app, path)) {
+        debug('installApp(%s): already installed at allocation via appium:app/otherApps, skipping', path);
+        return;
+      }
     }
     throw new Error(
       `TestingBotDriver cannot install "${path}" mid-session: TestingBot sessions start with the ` +
-      "app declared in the driver's `apps` option and support no later installs. " +
-      (declared
-        ? `The session was started with "${declared}" instead — point installApps and apps at the same build.`
+      "apps declared in the driver's `apps` option and support no later installs. " +
+      (declared.length
+        ? `The session was started with ${declared.map((a) => `"${a}"`).join(', ')} instead — list every app ` +
+          'you install in both `installApps` and the driver\'s `apps` option (first entry = app under test).'
         : "Declare it when constructing the driver: new TestingBotDriver({ apps: { " +
           `'${session.platform}${session.deviceType ? `-${session.deviceType}` : ''}': '${path}' } }).`),
     );

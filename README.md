@@ -41,6 +41,8 @@ export default defineConfig({
     // TestingBot sessions start with the app pre-installed — declare it here.
     // Local paths (.apk / .ipa / simulator .zip) upload automatically.
     apps: {
+      // A single path, or an array whose first entry is the app under test
+      // and the rest install alongside it (e.g. a mock server or test harness).
       android: './build/app.apk',
       'ios-simulator': './build/app-sim.zip',
       'ios-real': './build/app.ipa', // must be test-signed for real devices
@@ -97,7 +99,9 @@ Regexes and version ranges work on both real and virtual devices: real devices r
 ```ts
 new TestingBotDriver({
   apps: { android: './build/app.apk' }, // app under test, most specific key wins
-                                        // ('ios-real' beats 'ios'); tb:// URLs allowed
+                                        // ('ios-real' beats 'ios'); tb:// URLs allowed.
+                                        // Array = app under test first, helper apps after:
+                                        //   android: ['./app.apk', './mock-server.apk']
   key: '...',                 // default: TESTINGBOT_KEY env
   secret: '...',              // default: TESTINGBOT_SECRET env
   sessionPerTest: false,      // true = fresh session (and video) per test
@@ -235,7 +239,7 @@ jobs:
 | `Test timeout ... while setting up "device"` | More `workers` than your plan's parallel limit: TestingBot queues up to 2× the limit server-side and the driver waits out the rest, all inside the test-scoped device fixture. The driver warns with your plan's number — set `workers` to at most that, or raise the mobilewright `timeout`. |
 | `... is a simulator-only build and cannot be installed on a real device` | Build a test-signed `.ipa` for `deviceType: 'real'` projects. |
 | `"..." is not installed on this device` | The config's `bundleId` is not the package id of the build in `apps` (check with `aapt2 dump packagename app.apk`), or a stale `bundleId`/env override is in play. |
-| `cannot install "..." mid-session` | TestingBot has no mid-session installs — point `installApps` and the driver's `apps` at the same build. |
+| `cannot install "..." mid-session` | TestingBot has no mid-session installs — every app in `installApps` must also be listed in the driver's `apps` option (first entry = app under test, the rest install as helper apps). |
 | Modifier chords fail on iOS | XCUITest cannot hold modifier keys; chords are Android-only (`clearText()` handles iOS differently). |
 | Sessions show the run summary instead of a test name | The session hosted several tests; use `sessionPerTest: true` for guaranteed per-test naming. |
 | `DEBUG=testingbot:*` | Prints every allocation, hub command, upload, and report the driver performs. |
@@ -245,7 +249,7 @@ jobs:
 | mobilewright concept | TestingBot implementation |
 | --- | --- |
 | device allocation | Appium session on `hub.testingbot.com` (the session UUID is the device id); busy devices queue server-side |
-| app install | uploaded to TestingBot storage at allocation time and passed as `appium:app` — no mid-session installs |
+| app install | uploaded to TestingBot storage at allocation time and passed as `appium:app`, helper apps as `appium:otherApps` (re-signed automatically for real iOS) — no mid-session installs |
 | taps/swipes/gestures | W3C pointer actions |
 | view hierarchy | Appium page source, mapped to mobilewright's `ViewNode` tree |
 | webviews | Appium contexts (`webViewBridge`) |
