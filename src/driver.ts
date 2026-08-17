@@ -683,6 +683,9 @@ export class TestingBotDriver implements MobilewrightDriver {
       if (typeof test.video === 'string' && test.video) {
         return { status: 'success', url: test.video, duration: test.duration };
       }
+      if (test.video === false) {
+        return { status: 'disabled' };
+      }
     } catch {
       // fall through to the dashboard link
     }

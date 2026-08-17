@@ -218,7 +218,7 @@ export class FakeHub {
         this.testUpdates.set(id!, body as Record<string, string | string[]>);
         return rest({ success: true });
       }
-      return rest({ id, video: `http://127.0.0.1:${this.port}/videos/${id}.mp4`, duration: 12 });
+      return rest({ id, video: `http://127.0.0.1:${this.port}/videos/${id}.mp4`, assets_available: true, duration: 12 });
     }
 
     rest({ error: `FakeHub: unhandled ${method} ${path}` }, 404);

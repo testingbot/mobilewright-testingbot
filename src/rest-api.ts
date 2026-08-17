@@ -45,7 +45,10 @@ export interface TestUpdate {
 
 export interface TestDetails {
   id?: number | string;
-  video?: string;
+  /** Signed S3 URL to the recording, or false when video was disabled. */
+  video?: string | false;
+  /** True once asset processing (video, logs, screenshots) has finished. */
+  assets_available?: boolean;
   duration?: number;
   [key: string]: unknown;
 }

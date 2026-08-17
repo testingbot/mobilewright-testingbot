@@ -131,7 +131,14 @@ export class TestingBotTestObserver implements TestObserver {
         let videoUrl: string | undefined;
         for (; ;) {
           const test = await this.api.getTest(request.sessionId);
-          if (typeof test.video === 'string' && test.video) {
+          if (test.video === false) {
+            // Video was disabled for this session — waiting will not help.
+            break;
+          }
+          // assets_available is the API's "processing finished" signal; a
+          // populated video URL alone also suffices (the URL is presigned,
+          // so it is fetched right away below).
+          if ((test.assets_available ?? true) && typeof test.video === 'string' && test.video) {
             videoUrl = test.video;
             break;
           }
@@ -139,7 +146,7 @@ export class TestingBotTestObserver implements TestObserver {
           await new Promise((resolve) => setTimeout(resolve, 3_000));
         }
         if (!videoUrl) {
-          console.warn(`TestingBotDriver: video for session ${request.sessionId} was not ready in time; skipping ${request.output}`);
+          console.warn(`TestingBotDriver: video for session ${request.sessionId} is unavailable (disabled or not ready in time); skipping ${request.output}`);
           continue;
         }
         const response = await fetch(videoUrl, { signal: AbortSignal.timeout(60_000) });
