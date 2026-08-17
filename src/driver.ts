@@ -737,9 +737,9 @@ export class TestingBotDriver implements MobilewrightDriver {
       this.warnedAboutParallelism = true;
       console.warn(
         `TestingBotDriver: this run wants ${wanted}+ parallel ${isReal ? 'device' : 'VM'} sessions but the ` +
-        `plan allows ${limit}. Extra allocations queue until a slot frees up, and the wait counts against ` +
-        `mobilewright's test timeout — set workers: ${limit} (or fewer) in mobilewright.config.ts, or raise ` +
-        'the test timeout to cover the expected queue time.',
+        `plan allows ${limit} (TestingBot queues up to ${limit * 2} more server-side; the rest wait for a ` +
+        `freed slot). The wait counts against mobilewright's test timeout — set workers: ${limit} (or fewer) ` +
+        'in mobilewright.config.ts, or raise the test timeout to cover the expected queue time.',
       );
     }
   }

@@ -171,7 +171,7 @@ jobs:
 | `TestingBot sessions must start with an app` | Declare the app in the driver's `apps` option (per platform / device type). |
 | `No TestingBot real device matches ...` / `No TestingBot simulator matches ...` | The criteria matched nothing in the catalog — check [available devices](https://testingbot.com/support/devices), loosen `osVersion`/`deviceName`. |
 | Allocation waits for minutes | The matching device is busy; TestingBot queues the session until it frees up (bounded by `allocationTimeout`). |
-| `Test timeout ... while setting up "device"` | More `workers` than your plan's parallel limit: queued slots wait inside the test-scoped device fixture. The driver warns with your plan's number — set `workers` to at most that, or raise the mobilewright `timeout`. |
+| `Test timeout ... while setting up "device"` | More `workers` than your plan's parallel limit: TestingBot queues up to 2× the limit server-side and the driver waits out the rest, all inside the test-scoped device fixture. The driver warns with your plan's number — set `workers` to at most that, or raise the mobilewright `timeout`. |
 | `... is a simulator-only build and cannot be installed on a real device` | Build a test-signed `.ipa` for `deviceType: 'real'` projects. |
 | `cannot install "..." mid-session` | TestingBot has no mid-session installs — point `installApps` and the driver's `apps` at the same build. |
 | Modifier chords fail on iOS | XCUITest cannot hold modifier keys; chords are Android-only (`clearText()` handles iOS differently). |
