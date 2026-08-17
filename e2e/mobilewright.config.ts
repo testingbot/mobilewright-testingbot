@@ -10,7 +10,9 @@ import { TestingBotDriver } from '@testingbot/mobilewright-driver';
  */
 const config: MobilewrightConfig = {
   testDir: '.',
-  timeout: 180_000,
+  // E2E_TIMEOUT raises the per-test timeout for queue soaks (fixture waits
+  // for a device slot count against it).
+  timeout: Number(process.env['E2E_TIMEOUT'] ?? 180_000),
   bundleId: process.env['E2E_BUNDLE_ID'] ?? 'com.mobilenext.Milliways',
   autoAppLaunch: false,
   fullyParallel: true,
