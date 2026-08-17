@@ -179,3 +179,75 @@ describe('pool lifecycle against FakeHub', () => {
     expect(String(hub.testUpdates.get(a.deviceId)!['test[status_message]'])).toContain('boarding');
   });
 });
+
+describe('sessionPerTest against FakeHub', () => {
+  let hub: FakeHub;
+
+  beforeEach(async () => {
+    hub = new FakeHub();
+    await hub.start();
+  });
+
+  afterEach(async () => {
+    await hub.stop();
+  });
+
+  const options = () => ({
+    key: 'k',
+    secret: 's',
+    hubUrl: hub.hubUrl,
+    apiUrl: hub.apiUrl,
+    allocationTimeout: 5_000,
+    commandTimeout: 2_000,
+    apps: { ios: 'tb://prebuilt-ios' } as const,
+    sessionPerTest: true,
+  });
+
+  it('rotates the WebDriver session on every test and reports all of them', async () => {
+    const coordinator = new TestingBotDriver(options());
+    await coordinator.prepare();
+    const allocated = await coordinator.allocate({ platform: 'ios', deviceType: 'simulator' }, new Set());
+
+    const worker = new TestingBotDriver(options());
+    // Test 1 uses the session allocate() created.
+    await worker.connect({ platform: 'ios', deviceId: allocated.deviceId, deviceType: 'simulator' });
+    await worker.tap(1, 1);
+    await worker.disconnect();
+    expect(hub.liveSessions()).toHaveLength(0); // per-test session ended at test end
+
+    // Test 2 gets a fresh session on the same pool slot.
+    await worker.connect({ platform: 'ios', deviceId: allocated.deviceId, deviceType: 'simulator' });
+    const fresh = hub.liveSessions()[0]!;
+    expect(fresh.id).not.toBe(allocated.deviceId);
+    expect(fresh.capabilities['appium:app']).toBe('tb://prebuilt-ios');
+    await worker.disconnect();
+    expect(hub.liveSessions()).toHaveLength(0);
+
+    await coordinator.release(allocated.deviceId); // original already gone — swallowed
+    await coordinator.dispose();
+
+    // The observer reports the original AND the rotated session.
+    await coordinator.observer!.onRunEnd?.({ status: 'passed', startTime: new Date(0), duration: 1 });
+    expect(hub.testUpdates.get(allocated.deviceId)).toMatchObject({ 'test[success]': '1' });
+    expect(hub.testUpdates.get(fresh.id)).toMatchObject({ 'test[success]': '1' });
+  });
+
+  it('a second worker process rotates instead of failing on the consumed original session', async () => {
+    const coordinator = new TestingBotDriver(options());
+    await coordinator.prepare();
+    const allocated = await coordinator.allocate({ platform: 'ios', deviceType: 'simulator' }, new Set());
+
+    const worker1 = new TestingBotDriver(options());
+    await worker1.connect({ platform: 'ios', deviceId: allocated.deviceId, deviceType: 'simulator' });
+    await worker1.disconnect(); // original session deleted
+
+    // A different worker process (fresh driver instance) gets the same slot:
+    // the original id is dead, so it must start a fresh session, not fail.
+    const worker2 = new TestingBotDriver(options());
+    const session = await worker2.connect({ platform: 'ios', deviceId: allocated.deviceId, deviceType: 'simulator' });
+    expect(session.deviceId).toBe(allocated.deviceId); // pool handle unchanged
+    expect(hub.liveSessions()).toHaveLength(1);
+    await worker2.disconnect();
+    await coordinator.dispose();
+  });
+});

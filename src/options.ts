@@ -57,6 +57,13 @@ export interface TestingBotDriverOptions {
   tbOptions?: Record<string, unknown>;
   /** Report pass/fail to TestingBot after the run. Default: 'on'. */
   testResults?: 'on' | 'off';
+  /**
+   * Start a fresh TestingBot session for every test instead of reusing the
+   * device slot's session across tests. One dashboard entry, video, and
+   * pass/fail per test — at the cost of session startup time (device boot)
+   * on every test. Default: false (mobilewright's pool reuses sessions).
+   */
+  sessionPerTest?: boolean;
 }
 
 export interface ResolvedOptions {
@@ -75,6 +82,7 @@ export interface ResolvedOptions {
   capabilities: Record<string, unknown>;
   tbOptions: Record<string, unknown>;
   testResults: 'on' | 'off';
+  sessionPerTest: boolean;
 }
 
 /**
@@ -101,6 +109,7 @@ export function resolveOptions(options: TestingBotDriverOptions = {}): ResolvedO
     capabilities: options.capabilities ?? {},
     tbOptions: options.tbOptions ?? {},
     testResults: options.testResults ?? 'on',
+    sessionPerTest: options.sessionPerTest ?? false,
   };
 }
 

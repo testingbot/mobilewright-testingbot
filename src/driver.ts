@@ -42,6 +42,7 @@ import { parseChord, toAndroidKeyPress, toW3CKeyActions, typeTextActions } from 
 import { TestingBotTestObserver } from './observer.js';
 import { requireCredentials, resolveOptions, type ResolvedOptions, type TestingBotDriverOptions } from './options.js';
 import { RestApiClient } from './rest-api.js';
+import { RunLog } from './run-log.js';
 import { WebDriverClient } from './webdriver-client.js';
 
 const debug = createDebug('testingbot:driver');
@@ -103,6 +104,7 @@ export class TestingBotDriver implements MobilewrightDriver {
   private readonly catalog: DeviceCatalog;
   private readonly storage: AppStorage;
   private readonly keepalive: Keepalive;
+  private readonly runLog: RunLog;
 
   /** Sessions created by this instance's allocate() (coordinator process). */
   private readonly allocated = new Map<string, AllocatedSession>();
@@ -115,6 +117,8 @@ export class TestingBotDriver implements MobilewrightDriver {
   private readonly pinCounts = new Map<string, number>();
   /** The session this instance is connected to (worker process). */
   private active: ActiveSession | undefined;
+  /** sessionPerTest: pool slots whose original session this instance has already probed/used. */
+  private readonly rotatedDeviceIds = new Set<string>();
 
   constructor(options: TestingBotDriverOptions = {}) {
     this.options = resolveOptions(options);
@@ -123,10 +127,13 @@ export class TestingBotDriver implements MobilewrightDriver {
     this.catalog = new DeviceCatalog(this.api);
     this.storage = new AppStorage(this.api);
     this.keepalive = new Keepalive(this.hub);
+    this.runLog = new RunLog();
     this.observer = this.options.testResults === 'off'
       ? undefined
       : new TestingBotTestObserver(this.api, {
-        sessionIds: () => [...this.everAllocated.keys()],
+        // Union of coordinator-allocated sessions and (with sessionPerTest)
+        // the per-test sessions workers logged to the shared run file.
+        sessionIds: () => [...new Set([...this.everAllocated.keys(), ...this.runLog.sessionIds()])],
         build: this.options.build,
       });
   }
@@ -135,6 +142,7 @@ export class TestingBotDriver implements MobilewrightDriver {
 
   async prepare(): Promise<void> {
     requireCredentials(this.options);
+    this.runLog.truncate(); // drop session/app records from any previous run
     await this.api.getUser();
     debug('credentials verified against %s', this.options.apiUrl);
   }
@@ -173,6 +181,11 @@ export class TestingBotDriver implements MobilewrightDriver {
       appUrl = isRemoteApp(configuredApp)
         ? configuredApp
         : (await this.storage.ensureUploaded(configuredApp, criteria.deviceType)).app_url;
+      if (this.options.sessionPerTest && criteria.platform) {
+        // Workers rotating sessions per test reuse this upload instead of
+        // re-uploading the binary once per worker process.
+        this.runLog.append({ type: 'app', platform: criteria.platform, deviceType: criteria.deviceType, url: appUrl });
+      }
     }
 
     const capabilities = buildCapabilities(criteria, this.options, pinned, appUrl);
@@ -272,24 +285,89 @@ export class TestingBotDriver implements MobilewrightDriver {
   // ─── MobilewrightSession: connection ───────────────────────────
 
   async connect(config: ConnectionConfig): Promise<Session> {
-    const sessionId = config.deviceId;
-    if (!sessionId) {
+    const poolDeviceId = config.deviceId;
+    if (!poolDeviceId) {
       throw new Error(
         'TestingBotDriver.connect requires a deviceId (the WebDriver session UUID from allocate()). ' +
         'Run through "mobilewright test" so the device pool allocates first.',
       );
     }
-    // Liveness probe — also validates the id belongs to a live TB session.
-    await this.hub.get(sessionId, '/orientation', { timeout: config.timeout ?? this.options.commandTimeout });
+    const timeout = config.timeout ?? this.options.commandTimeout;
+
+    if (!this.options.sessionPerTest) {
+      // Liveness probe — also validates the id belongs to a live TB session.
+      await this.hub.get(poolDeviceId, '/orientation', { timeout });
+      this.active = { sessionId: poolDeviceId, platform: config.platform, deviceType: config.deviceType };
+      debug('connected to session %s', poolDeviceId);
+      return { deviceId: poolDeviceId, platform: config.platform };
+    }
+
+    // sessionPerTest: the first test on this slot uses the session allocate()
+    // created; every later connect starts a fresh one (the previous test's
+    // session was deleted in disconnect()). The original may also already be
+    // gone when another worker process ran the slot's first test — then the
+    // probe fails and we rotate too.
+    let sessionId: string | undefined;
+    if (!this.rotatedDeviceIds.has(poolDeviceId)) {
+      try {
+        await this.hub.get(poolDeviceId, '/orientation', { timeout });
+        sessionId = poolDeviceId;
+      } catch {
+        debug('slot %s has no live session, starting a fresh one', poolDeviceId);
+      }
+      this.rotatedDeviceIds.add(poolDeviceId);
+    }
+    sessionId ??= await this.startFreshSession(config);
     this.active = { sessionId, platform: config.platform, deviceType: config.deviceType };
-    debug('connected to session %s', sessionId);
-    return { deviceId: sessionId, platform: config.platform };
+    debug('connected to session %s (slot %s)', sessionId, poolDeviceId);
+    return { deviceId: poolDeviceId, platform: config.platform };
   }
 
   async disconnect(): Promise<void> {
-    // Soft detach only: the pool re-grants this slot to the next test and
-    // ends the session via release().
+    const session = this.active;
     this.active = undefined;
+    if (!this.options.sessionPerTest || !session) {
+      // Soft detach only: the pool re-grants this slot to the next test and
+      // ends the session via release().
+      return;
+    }
+    // sessionPerTest: this test's session ends here; the next connect starts
+    // a fresh one. release()/dispose() failures on the long-gone original
+    // pool session are swallowed there.
+    await this.hub.deleteSession(session.sessionId)
+      .catch(() => this.api.stopTest(session.sessionId).catch(() => { }));
+    debug('ended per-test session %s', session.sessionId);
+  }
+
+  /** Create a new hub session for this slot from the connect() config. */
+  private async startFreshSession(config: ConnectionConfig): Promise<string> {
+    const criteria: AllocationCriteria = {
+      platform: config.platform,
+      deviceType: config.deviceType,
+      osVersion: config.osVersion,
+      deviceNamePattern: config.deviceName instanceof RegExp ? config.deviceName.source : config.deviceName,
+    };
+    let pinned: PinnedDevice | undefined;
+    if (criteria.deviceType === 'real') {
+      pinned = await this.catalog.pickRealDevice(criteria, this.pinCounts);
+    } else if (criteria.osVersion || criteria.deviceNamePattern) {
+      pinned = await this.catalog.pickVirtualDevice(criteria);
+    }
+    // Prefer the app the coordinator already uploaded for this platform.
+    let appUrl = criteria.platform ? this.runLog.appUrlFor(criteria.platform, criteria.deviceType) : undefined;
+    if (!appUrl) {
+      const configuredApp = appForCriteria(criteria, this.options.apps);
+      if (configuredApp) {
+        appUrl = isRemoteApp(configuredApp)
+          ? configuredApp
+          : (await this.storage.ensureUploaded(configuredApp, criteria.deviceType)).app_url;
+      }
+    }
+    const capabilities = buildCapabilities(criteria, this.options, pinned, appUrl);
+    const { sessionId } = await this.hub.newSession(capabilities, { timeout: this.options.allocationTimeout });
+    this.runLog.append({ type: 'session', sessionId });
+    debug('started per-test session %s — https://testingbot.com/members/tests/%s', sessionId, sessionId);
+    return sessionId;
   }
 
   // ─── MobilewrightSession: device settings ──────────────────────
