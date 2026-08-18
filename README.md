@@ -1,6 +1,6 @@
 # @testingbot/mobilewright-driver
 
-Run [Mobilewright](https://github.com/mobile-next/mobilewright) mobile tests on [TestingBot](https://testingbot.com)'s device cloud — real iOS/Android devices, iOS simulators, and Android emulators.
+Run [Mobilewright](https://github.com/mobile-next/mobilewright) mobile tests on [TestingBot](https://testingbot.com)'s device cloud: real iOS/Android devices, iOS simulators and Android emulators.
 
 Requires `mobilewright >= 0.0.53` (the first release that accepts driver instances) and Node >= 18.
 
@@ -177,8 +177,6 @@ Notes:
   reuses the device.
 - Calling a command outside a test body raises an explanatory error rather
   than a null-reference.
-- `tb:intercept` and `tb:network` (request mocking and network logs) are
-  Chrome/Edge-only on TestingBot and are therefore not exposed here.
 
 ### Recipe: name every session after its test
 
@@ -278,11 +276,6 @@ npm run build
 Live e2e tests against a real TestingBot account live in `e2e/` (see `e2e/mobilewright.config.ts`).
 
 ### Releasing
-
-The version bump, tag and GitHub release are made locally — the TestingBot
-org's IP allow list blocks GitHub-hosted runners from pushing here — and the
-Release workflow then publishes to npm via trusted publishing (OIDC), so no
-npm token exists anywhere:
 
 ```bash
 npm version minor -m "Release v%s"      # patch | minor | major
