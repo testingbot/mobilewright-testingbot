@@ -14,13 +14,13 @@ import { testingbot } from '@testingbot/mobilewright-driver';
 // even when the reporting is wrong.
 if (process.env['E2E_DEFECT_REPRO'] === '1') {
   test('passes', async ({ device, screen, bundleId }) => {
-    await device.launchApp(bundleId);
+    await device.launchApp(bundleId!);
     console.log(`REPRO_SESSION passes=${testingbot.sessionId()}`);
     await screen.screenshot();
   });
 
   test('fails on purpose', async ({ device, screen, bundleId }) => {
-    await device.launchApp(bundleId);
+    await device.launchApp(bundleId!);
     console.log(`REPRO_SESSION fails on purpose=${testingbot.sessionId()}`);
     await expect(screen.getByText('ThisTextDoesNotExistAnywhere')).toBeVisible({ timeout: 5_000 });
   });

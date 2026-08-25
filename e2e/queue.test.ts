@@ -6,7 +6,7 @@ import { expect, test } from '@mobilewright/test';
 if (process.env['E2E_QUEUE'] === '1') {
   for (let i = 1; i <= 20; i++) {
     test(`queue drain #${String(i).padStart(2, '0')}`, async ({ device, screen, bundleId }) => {
-      await device.launchApp(bundleId);
+      await device.launchApp(bundleId!);
       await expect(screen.getByText('Milliways', { exact: false })).toBeVisible();
     });
   }

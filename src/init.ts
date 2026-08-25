@@ -56,7 +56,9 @@ export function renderSampleTest(answers: InitAnswers): string {
   return `import { test, expect } from '@mobilewright/test';
 
 test('app launches', async ({ device, screen, bundleId }) => {
-  await device.launchApp(bundleId);
+  // bundleId is typed string | undefined (it is optional in the config);
+  // the ! says "I set it in mobilewright.config.ts", which init just did.
+  await device.launchApp(bundleId!);
   // Adjust to something your app actually shows:
   await expect(screen.getByText('Welcome', { exact: false })).toBeVisible();
 });

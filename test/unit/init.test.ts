@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_ANSWERS, renderConfig, runInit } from '../../src/init.js';
+import { DEFAULT_ANSWERS, renderConfig, renderSampleTest, runInit } from '../../src/init.js';
 
 function fakeIo(answers: Record<string, string> = {}) {
   const logs: string[] = [];
@@ -17,6 +17,16 @@ function fakeIo(answers: Record<string, string> = {}) {
 }
 
 describe('init scaffolder', () => {
+  it('renders a sample test that compiles under strict TypeScript', () => {
+    // The bundleId fixture is typed `string | undefined` while launchApp()
+    // takes a `string`, so a bare `bundleId` makes the very first file a new
+    // user opens fail to typecheck. init has just written the bundleId into
+    // the config, so asserting it is correct.
+    const sample = renderSampleTest(DEFAULT_ANSWERS);
+    expect(sample).toContain('launchApp(bundleId!)');
+    expect(sample).not.toMatch(/launchApp\(bundleId\)/);
+  });
+
   it('renders a config that matches the chosen targets and apps', () => {
     const config = renderConfig({
       bundleId: 'com.tb.Demo',

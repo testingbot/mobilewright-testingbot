@@ -61,7 +61,7 @@ export default defineConfig({
 import { test, expect } from '@mobilewright/test';
 
 test('shows the welcome screen', async ({ device, screen, bundleId }) => {
-  await device.launchApp(bundleId);
+  await device.launchApp(bundleId!);
   await expect(screen.getByText('Welcome')).toBeVisible();
 });
 ```
@@ -146,7 +146,7 @@ import { test, expect } from '@mobilewright/test';
 import { testingbot } from '@testingbot/mobilewright-driver';
 
 test('checkout survives a slow network', async ({ device, screen, bundleId }) => {
-  await device.launchApp(bundleId);
+  await device.launchApp(bundleId!);
 
   await testingbot.annotate('starting checkout');   // shows in the session timeline
   await testingbot.throttle('3G');
