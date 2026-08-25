@@ -246,9 +246,15 @@ describe('pool lifecycle against FakeHub', () => {
     );
     await coordinator.observer!.onRunEnd?.({ status: 'failed', startTime: new Date(0), duration: 10 });
 
-    expect(hub.testUpdates.get(a.deviceId)).toMatchObject({ 'test[success]': '0' });
-    expect(hub.testUpdates.get(b.deviceId)).toMatchObject({ 'test[success]': '0' });
-    expect(String(hub.testUpdates.get(a.deviceId)!['test[status_message]'])).toContain('boarding');
+    // Both are reached — but neither ever hosted a test the observer can see,
+    // so neither may be stamped with the failing test's verdict. Only the
+    // metadata that is true of the whole run goes out.
+    expect(hub.testUpdates.get(a.deviceId)).toMatchObject({ 'groups[]': 'mobilewright' });
+    expect(hub.testUpdates.get(b.deviceId)).toMatchObject({ 'groups[]': 'mobilewright' });
+    for (const id of [a.deviceId, b.deviceId]) {
+      expect(hub.testUpdates.get(id)).not.toHaveProperty('test[success]');
+      expect(hub.testUpdates.get(id)).not.toHaveProperty('test[status_message]');
+    }
   });
 });
 
@@ -307,6 +313,118 @@ describe('sessionPerTest against FakeHub', () => {
     await coordinator.observer!.onRunEnd?.({ status: 'passed', startTime: new Date(0), duration: 1 });
     expect(hub.testUpdates.get(allocated.deviceId)).toMatchObject({ 'test[success]': '1' });
     expect(hub.testUpdates.get(fresh.id)).toMatchObject({ 'test[success]': '1' });
+  });
+
+  it('never reports one test\'s failure on the session another test ran in', async () => {
+    // The reported defect, end to end through the real run file: two per-test
+    // sessions, the first test passes and the second fails. FakeHub sessions
+    // last milliseconds, so the two tests' intervals are indistinguishable
+    // inside the observer's clock-skew slack and neither session can be
+    // attributed — which is exactly the state that used to hand the passing
+    // test's session the run aggregate ("1 of 2 tests failed ...", success=0).
+    const coordinator = new TestingBotDriver(options());
+    await coordinator.prepare();
+    const allocated = await coordinator.allocate({ platform: 'ios', deviceType: 'simulator' }, new Set());
+    const worker = new TestingBotDriver(options());
+
+    coordinator.observer!.onRunStart?.({ totalTests: 2 });
+    await worker.connect({ platform: 'ios', deviceId: allocated.deviceId, deviceType: 'simulator' });
+    await worker.disconnect();
+    coordinator.observer!.onTestEnd?.(
+      { id: 't1', title: 'passes', titlePath: ['', 'ios', 'f', 'passes'] },
+      { status: 'passed', retry: 0, duration: 5, errors: [], steps: [] },
+    );
+    await worker.connect({ platform: 'ios', deviceId: allocated.deviceId, deviceType: 'simulator' });
+    const second = hub.liveSessions()[0]!.id;
+    await worker.disconnect();
+    coordinator.observer!.onTestEnd?.(
+      { id: 't2', title: 'fails on purpose', titlePath: ['', 'ios', 'f', 'fails on purpose'] },
+      { status: 'failed', retry: 0, duration: 5, errors: ['ExpectError: not visible'], steps: [] },
+    );
+    await coordinator.release(allocated.deviceId);
+    await coordinator.observer!.onRunEnd?.({ status: 'failed', startTime: new Date(0), duration: 10 });
+
+    // Both sessions really did host one test each — the run file proves it —
+    // but which is which is not knowable here, so neither carries a verdict.
+    for (const id of [allocated.deviceId, second]) {
+      expect(hub.testUpdates.get(id)).toMatchObject({ 'groups[]': 'mobilewright' });
+      expect(hub.testUpdates.get(id)).not.toHaveProperty('test[success]');
+      expect(hub.testUpdates.get(id)).not.toHaveProperty('test[name]');
+    }
+    await coordinator.dispose();
+  });
+
+  it('names each per-test session from the run report\'s worker index and timings', async () => {
+    // The same two-session run as above, now with the run report mobilewright
+    // exposes at onRunEnd. The driver stamped TEST_WORKER_INDEX on each run-file
+    // record from inside the worker and the report reports the same index per
+    // test, so the two are joined by identity — and the failing test's verdict
+    // lands on its own session instead of being withheld from both.
+    const coordinator = new TestingBotDriver(options());
+    await coordinator.prepare();
+    const allocated = await coordinator.allocate({ platform: 'ios', deviceType: 'simulator' }, new Set());
+    const worker = new TestingBotDriver(options());
+
+    // FakeHub answers in well under a millisecond, so the two tests would
+    // otherwise share one timestamp and be genuinely indistinguishable. Real
+    // device sessions last seconds; a 2ms gap stands in for that.
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 2));
+    const marks: number[] = [];
+    let second: string;
+    process.env['TEST_WORKER_INDEX'] = '0';
+    try {
+      marks.push(Date.now());
+      await worker.connect({ platform: 'ios', deviceId: allocated.deviceId, deviceType: 'simulator' });
+      await worker.disconnect();
+      await tick();
+      marks.push(Date.now());
+      await worker.connect({ platform: 'ios', deviceId: allocated.deviceId, deviceType: 'simulator' });
+      second = hub.liveSessions()[0]!.id;
+      await worker.disconnect();
+      await tick();
+      marks.push(Date.now());
+    } finally {
+      delete process.env['TEST_WORKER_INDEX'];
+    }
+
+    coordinator.observer!.onRunStart?.({ totalTests: 2 });
+    coordinator.observer!.onTestEnd?.(
+      { id: 'passes', title: 'passes', titlePath: ['', 'ios', 'f', 'passes'] },
+      { status: 'passed', retry: 0, duration: 5, errors: [], steps: [] },
+    );
+    coordinator.observer!.onTestEnd?.(
+      { id: 'fails', title: 'fails on purpose', titlePath: ['', 'ios', 'f', 'fails on purpose'] },
+      { status: 'failed', retry: 0, duration: 5, errors: ['ExpectError: not visible'], steps: [] },
+    );
+    await coordinator.release(allocated.deviceId);
+    await coordinator.observer!.onRunEnd?.({
+      status: 'failed',
+      startTime: new Date(0),
+      duration: 10,
+      jsonReport: async () => ({
+        suites: [{
+          specs: [
+            {
+              id: 'passes',
+              tests: [{ results: [{ workerIndex: 0, startTime: new Date(marks[0]!).toISOString(), duration: marks[1]! - marks[0]! }] }],
+            },
+            {
+              id: 'fails',
+              tests: [{ results: [{ workerIndex: 0, startTime: new Date(marks[1]!).toISOString(), duration: marks[2]! - marks[1]! }] }],
+            },
+          ],
+        }],
+      }),
+    });
+
+    expect(hub.testUpdates.get(allocated.deviceId)).toMatchObject({
+      'test[name]': 'passes', 'test[success]': '1', 'test[status_message]': 'passed',
+    });
+    expect(hub.testUpdates.get(second)).toMatchObject({
+      'test[name]': 'fails on purpose', 'test[success]': '0',
+    });
+    expect(String(hub.testUpdates.get(second)!['test[status_message]'])).toContain('ExpectError');
+    await coordinator.dispose();
   });
 
   it('a second worker process rotates instead of failing on the consumed original session', async () => {

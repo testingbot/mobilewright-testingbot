@@ -92,6 +92,8 @@ Regexes and version ranges work on both real and virtual devices: real devices r
 
 - By default a device slot's TestingBot session is reused across tests (fast: you pay device startup once). Sessions that hosted exactly one test are named after that test with its own pass/fail; sessions that hosted several get a run summary (e.g. `12/12 tests passed`).
 - Set **`sessionPerTest: true`** for one session, video, and named verdict **per test** — the clearest dashboard, at the cost of device startup on every test.
+- Tests are matched to sessions by **worker identity first**: the driver stamps Playwright's worker index on each session as it records it, and the run report reports the same index per test, so a test that ran in another worker process is never a candidate. Timing separates the tests within one worker, using the worker's own timestamps from the report when it is available.
+- A session is only ever given a verdict the driver can stand behind: its own test's, or the run summary when it genuinely hosted several tests (or was the run's only session). When a session cannot be tied to a test — an ambiguous overlap under heavy parallelism, or a worker that died before recording its span — it is reported with build, extra and tags but **no** pass/fail, rather than inheriting a failure from a test that ran somewhere else. `DEBUG=testingbot:observer` names the session and the reason.
 - Git metadata is reported automatically when mobilewright captures it: the commit hash, branch, author and subject land in the session's **extra** field (alongside your own `extra`, never replacing it), and the branch is added as a **tag** so the dashboard can filter by it. Enable it with `captureGitInfo: { commit: true }` in `mobilewright.config.ts` — Playwright turns it on by itself in CI.
 - Failure messages are reported to the session's status message; `build` groups sessions on the dashboard and **defaults automatically from CI environments** (GitHub Actions, GitLab, CircleCI, Buildkite, Bitrise, Travis, Azure DevOps, Jenkins, TeamCity → e.g. `owner/repo #123`), or from a `TESTINGBOT_BUILD` variable.
 
@@ -240,7 +242,8 @@ jobs:
 | `"..." is not installed on this device` | The config's `bundleId` is not the package id of the build in `apps` (check with `aapt2 dump packagename app.apk`), or a stale `bundleId`/env override is in play. |
 | `cannot install "..." mid-session` | TestingBot has no mid-session installs — every app in `installApps` must also be listed in the driver's `apps` option (first entry = app under test, the rest install as helper apps). |
 | Modifier chords fail on iOS | XCUITest cannot hold modifier keys; chords are Android-only (`clearText()` handles iOS differently). |
-| Sessions show the run summary instead of a test name | The session hosted several tests; use `sessionPerTest: true` for guaranteed per-test naming. |
+| Sessions show the run summary instead of a test name | The session hosted several tests; `sessionPerTest: true` gives each test its own session. |
+| A session shows no pass/fail at all | The driver could not tell which test ran in it and declined to guess. Run with `DEBUG=testingbot:observer` — it logs the session id and why. |
 | `DEBUG=testingbot:*` | Prints every allocation, hub command, upload, and report the driver performs. |
 
 ## How it maps to TestingBot
@@ -259,6 +262,7 @@ jobs:
 ## Current limitations
 
 - One TestingBot session may host several mobilewright tests unless `sessionPerTest: true`; multi-test sessions report the run-level verdict.
+- The worker process that owns a session is never told which test it is running, so the session-to-test join is reconstructed after the run from Playwright's worker index plus timing. Without the run report (`jsonReport()`) it degrades to timing alone. Either way it is deliberately conservative and leaves a session unjudged rather than risk naming it after the wrong test.
 - Modifier key chords (`pressKeys(['ctrl+a'])`) work on Android only — XCUITest cannot hold modifier keys.
 - `pressButton` on iOS supports `HOME`, `VOLUME_UP`, `VOLUME_DOWN`; `listApps()` reports the foreground app only.
 - Screenshots are always PNG. `applyDeviceSettings` turns Android animations off best-effort via `mobile: shell` (a no-op on iOS).

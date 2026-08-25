@@ -362,6 +362,18 @@ export class TestingBotDriver implements MobilewrightDriver {
     this.active = undefined;
     setActiveDriver(undefined);
     if (!session) return;
+    // First thing, before any await: the timed record is what lets the
+    // observer attribute this test's verdict to exactly this session, and a
+    // session it cannot attribute gets no verdict at all. Nothing in teardown
+    // — a hub round-trip, a hung request, the worker dying — may come between
+    // the test ending and this line.
+    this.runLog.append({
+      type: 'session',
+      sessionId: session.sessionId,
+      startedAt: session.connectedAt,
+      endedAt: Date.now(),
+      workerIndex: workerIndex(),
+    });
     if (session.throttled) {
       // A pooled session outlives the test: reset network conditions so they
       // cannot leak into whichever test gets this slot next.
@@ -371,27 +383,13 @@ export class TestingBotDriver implements MobilewrightDriver {
     }
     if (!this.options.sessionPerTest) {
       // Soft detach only: the pool re-grants this slot to the next test and
-      // ends the session via release(). Still record this test's interval —
-      // a pooled session that hosted exactly one test can then be renamed to
-      // that test at run end.
-      this.runLog.append({
-        type: 'session',
-        sessionId: session.sessionId,
-        startedAt: session.connectedAt,
-        endedAt: Date.now(),
-      });
+      // ends the session via release(). A pooled session that hosted exactly
+      // one test is renamed to that test at run end.
       return;
     }
     // sessionPerTest: this test's session ends here; the next connect starts
-    // a fresh one. The timed record lets the observer attribute this test's
-    // verdict to exactly this session. release()/dispose() failures on the
-    // long-gone original pool session are swallowed there.
-    this.runLog.append({
-      type: 'session',
-      sessionId: session.sessionId,
-      startedAt: session.connectedAt,
-      endedAt: Date.now(),
-    });
+    // a fresh one. release()/dispose() failures on the long-gone original
+    // pool session are swallowed there.
     await this.hub.deleteSession(session.sessionId)
       .catch(() => this.api.stopTest(session.sessionId).catch(() => { }));
     debug('ended per-test session %s', session.sessionId);
@@ -825,6 +823,17 @@ export class TestingBotDriver implements MobilewrightDriver {
     if (count <= 1) this.pinCounts.delete(name);
     else this.pinCounts.set(name, count - 1);
   }
+}
+
+/**
+ * The Playwright worker process this driver instance is running in, set by the
+ * runner itself (workerProcessEntry sets TEST_WORKER_INDEX). Absent in the
+ * coordinator process and in any non-Playwright host, which is why every
+ * consumer treats it as a hint rather than a requirement.
+ */
+function workerIndex(): number | undefined {
+  const raw = Number.parseInt(process.env['TEST_WORKER_INDEX'] ?? '', 10);
+  return Number.isInteger(raw) && raw >= 0 ? raw : undefined;
 }
 
 function str(value: unknown): string | undefined {

@@ -19,6 +19,11 @@ export interface SessionRecord {
    *  test end, used to attribute a test's verdict to its session. */
   startedAt?: number;
   endedAt?: number;
+  /** Playwright's TEST_WORKER_INDEX for the process that ran this test. The
+   *  identity half of the observer's session-to-test join: the run report
+   *  reports the same index per test, so a session can be matched against the
+   *  tests of its own worker instead of every test in the run. */
+  workerIndex?: number;
 }
 
 export interface AppRecord {
@@ -44,6 +49,10 @@ export interface MergedSession {
   spans: number;
   startedAt?: number;
   endedAt?: number;
+  /** The worker process that ran this session's test(s) — only when every
+   *  recorded cycle agrees, since a pooled slot re-granted across workers has
+   *  no single owner. */
+  workerIndex?: number;
 }
 
 export class RunLog {
@@ -90,6 +99,7 @@ export class RunLog {
    */
   sessions(): MergedSession[] {
     const byId = new Map<string, MergedSession>();
+    const workersSeen = new Map<string, Set<number>>();
     for (const record of this.read()) {
       if (record.type !== 'session') continue;
       const merged = byId.get(record.sessionId) ?? { sessionId: record.sessionId, spans: 0 };
@@ -98,7 +108,16 @@ export class RunLog {
         merged.startedAt = Math.min(merged.startedAt ?? record.startedAt, record.startedAt);
         merged.endedAt = Math.max(merged.endedAt ?? record.endedAt, record.endedAt);
       }
+      if (record.workerIndex !== undefined) {
+        const seen = workersSeen.get(record.sessionId) ?? new Set<number>();
+        seen.add(record.workerIndex);
+        workersSeen.set(record.sessionId, seen);
+      }
       byId.set(record.sessionId, merged);
+    }
+    for (const merged of byId.values()) {
+      const seen = workersSeen.get(merged.sessionId);
+      if (seen?.size === 1) merged.workerIndex = [...seen][0];
     }
     return [...byId.values()];
   }
