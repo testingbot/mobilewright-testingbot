@@ -1,6 +1,6 @@
 {
   "name": "@testingbot/mobilewright-driver",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "TestingBot driver for Mobilewright — run mobilewright tests on TestingBot's device cloud",
   "homepage": "https://testingbot.com",
   "license": "Apache-2.0",
