@@ -5,7 +5,7 @@
   "homepage": "https://testingbot.com",
   "license": "Apache-2.0",
   "engines": {
-    "node": ">=18"
+    "node": ">=20.19"
   },
   "type": "module",
   "main": "./dist/index.js",
@@ -28,7 +28,8 @@
     "url": "git+https://github.com/testingbot/mobilewright-testingbot.git"
   },
   "files": [
-    "dist"
+    "dist",
+    "CHANGELOG.md"
   ],
   "keywords": [
     "mobilewright",

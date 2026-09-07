@@ -2,7 +2,7 @@
 
 Run [Mobilewright](https://github.com/mobile-next/mobilewright) mobile tests on [TestingBot](https://testingbot.com)'s device cloud: real iOS/Android devices, iOS simulators and Android emulators.
 
-Requires `mobilewright >= 0.0.53` (the first release that accepts driver instances) and Node >= 18.
+Requires `mobilewright >= 0.0.53` (the first release that accepts driver instances) and Node >= 20.19 — mobilewright's own floor since 0.0.56.
 
 ## Quickstart
 
@@ -54,6 +54,9 @@ export default defineConfig({
   ],
 });
 ```
+
+`testingbotDriver({ ... })` is exported as an equivalent spelling of
+`new TestingBotDriver({ ... })`, if you prefer the config file to read as configuration.
 
 **4. Write a test** (`app.test.ts`):
 
@@ -220,7 +223,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20, cache: npm }
+        with: { node-version: 20.19, cache: npm }
       - run: npm ci
       - run: npx mobilewright test
         env:
@@ -282,6 +285,9 @@ npm run build
 Live e2e tests against a real TestingBot account live in `e2e/` (see `e2e/mobilewright.config.ts`).
 
 ### Releasing
+
+Update `CHANGELOG.md` first — it ships inside the published tarball.
+
 
 ```bash
 npm version minor -m "Release v%s"      # patch | minor | major
