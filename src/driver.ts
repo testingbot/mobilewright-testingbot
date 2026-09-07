@@ -50,6 +50,19 @@ import { WebDriverClient } from './webdriver-client.js';
 
 const debug = createDebug('testingbot:driver');
 
+/**
+ * Mirrors `Geolocation` from `@mobilewright/protocol`, which only gained the
+ * type in 0.0.56. Declaring it here keeps the driver compiling against the
+ * 0.0.53 floor of the peer range; the shape is identical, so the class still
+ * satisfies `MobilewrightSession` on newer protocols.
+ */
+export interface Geolocation {
+  /** Latitude in degrees, between -90 and 90. */
+  latitude: number;
+  /** Longitude in degrees, between -180 and 180. */
+  longitude: number;
+}
+
 interface AllocatedSession {
   sessionId: string;
   platform: Platform;
@@ -609,6 +622,27 @@ export class TestingBotDriver implements MobilewrightDriver {
     const session = this.session();
     await this.hub.post(session.sessionId, '/orientation', { orientation: orientation.toUpperCase() });
     session.screenSize = undefined; // width/height swap
+  }
+
+  /**
+   * TestingBot runs the stock Appium platform drivers, so the override goes
+   * through their extensions rather than the legacy `/location` endpoint:
+   * UiAutomator2 exposes `mobile: setGeolocation`/`mobile: resetGeolocation`,
+   * XCUITest `mobile: setSimulatedLocation`/`mobile: clearSimulatedLocation`.
+   */
+  async setGeolocation(geolocation: Geolocation | null): Promise<void> {
+    const { sessionId, platform } = this.session();
+    const [set, clear] = platform === 'android'
+      ? ['mobile: setGeolocation', 'mobile: resetGeolocation']
+      : ['mobile: setSimulatedLocation', 'mobile: clearSimulatedLocation'];
+    if (geolocation === null) {
+      await this.hub.execute(sessionId, clear);
+      debug('geolocation override cleared on %s', sessionId);
+      return;
+    }
+    const { latitude, longitude } = geolocation;
+    await this.hub.execute(sessionId, set, [{ latitude, longitude }]);
+    debug('geolocation set to %d,%d on %s', latitude, longitude, sessionId);
   }
 
   // ─── MobilewrightSession: apps ─────────────────────────────────

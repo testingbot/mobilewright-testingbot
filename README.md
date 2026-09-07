@@ -254,6 +254,7 @@ jobs:
 | app install | uploaded to TestingBot storage at allocation time and passed as `appium:app`, helper apps as `appium:otherApps` (re-signed automatically for real iOS) — no mid-session installs |
 | taps/swipes/gestures | W3C pointer actions |
 | view hierarchy | Appium page source, mapped to mobilewright's `ViewNode` tree |
+| geolocation | Appium's platform extensions: `mobile: setGeolocation`/`mobile: resetGeolocation` (Android), `mobile: setSimulatedLocation`/`mobile: clearSimulatedLocation` (iOS) |
 | webviews | Appium contexts (`webViewBridge`) |
 | pass/fail reporting | `PUT /v1/tests/:session` via the `TestObserver` hooks |
 | git metadata | commit/branch/author/subject from the run report → session `extra` + branch tag |
@@ -265,7 +266,8 @@ jobs:
 - The worker process that owns a session is never told which test it is running, so the session-to-test join is reconstructed after the run from Playwright's worker index plus timing. Without the run report (`jsonReport()`) it degrades to timing alone. Either way it is deliberately conservative and leaves a session unjudged rather than risk naming it after the wrong test.
 - Modifier key chords (`pressKeys(['ctrl+a'])`) work on Android only — XCUITest cannot hold modifier keys.
 - `pressButton` on iOS supports `HOME`, `VOLUME_UP`, `VOLUME_DOWN`; `listApps()` reports the foreground app only.
-- Screenshots are always PNG. `applyDeviceSettings` turns Android animations off best-effort via `mobile: shell` (a no-op on iOS).
+- Screenshots are always PNG, and `screenshot({ clip })` is not honoured yet — the full screen comes back uncropped. `applyDeviceSettings` turns Android animations off best-effort via `mobile: shell` (a no-op on iOS).
+- `setGeolocation` needs the platform driver's location extension to be available: emulators and simulators always are, real devices depend on the OS version TestingBot's Appium build supports (iOS 17+ for XCUITest).
 - Real iOS devices need a test-signed `.ipa`; simulator builds are rejected on real devices with a clear error.
 - While attached to a webview, the session's single Appium context is the web layer.
 
