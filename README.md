@@ -271,6 +271,7 @@ jobs:
 - `pressButton` on iOS supports `HOME`, `VOLUME_UP`, `VOLUME_DOWN`; `listApps()` reports the foreground app only.
 - Screenshots are always PNG, and `screenshot({ clip })` is not honoured yet — the full screen comes back uncropped. `applyDeviceSettings` turns Android animations off best-effort via `mobile: shell` (a no-op on iOS).
 - `setGeolocation` needs the platform driver's location extension to be available: emulators and simulators always are, real devices depend on the OS version TestingBot's Appium build supports (iOS 17+ for XCUITest).
+- `setFoldState` (protocol 0.0.62) throws: Appium has no hinge control for TestingBot's foldables.
 - Real iOS devices need a test-signed `.ipa`; simulator builds are rejected on real devices with a clear error.
 - While attached to a webview, the session's single Appium context is the web layer.
 

@@ -63,6 +63,12 @@ export interface Geolocation {
   longitude: number;
 }
 
+/**
+ * Mirrors `FoldState` from `@mobilewright/protocol`, which only gained the
+ * type in 0.0.62. Declared locally for the same reason as `Geolocation`.
+ */
+export type FoldState = 'folded' | 'half-open' | 'open' | number;
+
 interface AllocatedSession {
   sessionId: string;
   platform: Platform;
@@ -643,6 +649,18 @@ export class TestingBotDriver implements MobilewrightDriver {
     const { latitude, longitude } = geolocation;
     await this.hub.execute(sessionId, set, [{ latitude, longitude }]);
     debug('geolocation set to %d,%d on %s', latitude, longitude, sessionId);
+  }
+
+  /**
+   * Neither UiAutomator2 nor XCUITest exposes a hinge control, and TestingBot's
+   * foldables are real devices, so there is nothing to route this through.
+   */
+  async setFoldState(state: FoldState): Promise<void> {
+    this.session();
+    throw new Error(
+      `TestingBotDriver: setFoldState("${state}") is not supported — Appium has no ` +
+      'command to fold or unfold a device on TestingBot.',
+    );
   }
 
   // ─── MobilewrightSession: apps ─────────────────────────────────

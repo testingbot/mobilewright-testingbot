@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.0 — 2026-09-30
+
+Tracks `@mobilewright/protocol` 0.0.62.
+
+### Added
+- `setFoldState(state)` — required by `MobilewrightSession` as of protocol
+  0.0.62. It throws a descriptive error: neither UiAutomator2 nor XCUITest
+  exposes a hinge control, so there is no way to fold a TestingBot device.
+- The `FoldState` type is exported, declared locally like `Geolocation` since
+  it does not exist in 0.0.53.
+
 ## 0.4.0 — 2026-09-07
 
 Tracks `@mobilewright/protocol` 0.0.56.
