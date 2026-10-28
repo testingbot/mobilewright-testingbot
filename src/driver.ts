@@ -565,6 +565,16 @@ export class TestingBotDriver implements MobilewrightDriver {
     }
   }
 
+  /**
+   * Neither Appium driver can replace a field's value without an element
+   * reference, and the protocol only hands us the focused field — so clear it
+   * the same way `clearText()` does, then type the new value.
+   */
+  async fill(text: string): Promise<void> {
+    await this.clearText();
+    if (text) await this.typeText(text);
+  }
+
   async swipe(direction: SwipeDirection, opts?: SwipeOptions): Promise<void> {
     const { sessionId } = this.session();
     const screen = await this.getScreenSize();
@@ -728,6 +738,17 @@ export class TestingBotDriver implements MobilewrightDriver {
   async terminateApp(bundleId: string): Promise<void> {
     const { sessionId } = this.session();
     await this.hub.execute(sessionId, 'mobile: terminateApp', [{ appId: bundleId, bundleId }]);
+  }
+
+  /**
+   * Both drivers name the extension `mobile: clearApp`. UiAutomator2 runs
+   * `pm clear`, which also revokes runtime permissions as the protocol
+   * requires; XCUITest only supports it on simulators and reports its own
+   * error on real iOS devices.
+   */
+  async clearAppData(bundleId: string): Promise<void> {
+    const { sessionId } = this.session();
+    await this.hub.execute(sessionId, 'mobile: clearApp', [{ appId: bundleId, bundleId }]);
   }
 
   async listApps(): Promise<AppInfo[]> {
