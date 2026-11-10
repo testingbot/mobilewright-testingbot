@@ -219,6 +219,8 @@ export class FakeHub {
     if (path === '/v1/devices/available' || path === '/v1/devices') {
       return rest({
         devices: [
+          // Listed first so an unfiltered real-device pick lands on it.
+          { id: 2, name: 'Pixel', platform_name: 'Android', version: '7.1' },
           { id: 1, name: 'Pixel 8', platform_name: 'Android', version: '14' },
           { id: 3, name: 'iPhone 15', platform_name: 'iOS', version: '17.4' },
         ],

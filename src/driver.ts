@@ -291,6 +291,17 @@ export class TestingBotDriver implements MobilewrightDriver {
     };
     this.allocated.set(sessionId, session);
     this.everAllocated.set(sessionId, session);
+    if (this.options.sessionPerTest) {
+      // Workers rotating sessions on this slot need its device filter, which
+      // mobilewright's connect() does not forward.
+      this.runLog.append({
+        type: 'slot',
+        deviceId: sessionId,
+        deviceType: criteria.deviceType,
+        osVersion: criteria.osVersion,
+        deviceNamePattern: criteria.deviceNamePattern,
+      });
+    }
     this.keepalive.start(sessionId);
     debug('allocated session %s (%s %s) — https://testingbot.com/members/tests/%s',
       sessionId, session.deviceName, session.osVersion, sessionId);
@@ -369,7 +380,7 @@ export class TestingBotDriver implements MobilewrightDriver {
       }
       this.rotatedDeviceIds.add(poolDeviceId);
     }
-    sessionId ??= await this.startFreshSession(config);
+    sessionId ??= await this.startFreshSession(config, poolDeviceId);
     this.active = { sessionId, platform: config.platform, deviceType: config.deviceType, connectedAt: Date.now() };
     setActiveDriver(this);
     debug('connected to session %s (slot %s)', sessionId, poolDeviceId);
@@ -415,12 +426,17 @@ export class TestingBotDriver implements MobilewrightDriver {
   }
 
   /** Create a new hub session for this slot from the connect() config. */
-  private async startFreshSession(config: ConnectionConfig): Promise<string> {
+  private async startFreshSession(config: ConnectionConfig, poolDeviceId: string): Promise<string> {
+    // mobilewright's connect() passes only platform/deviceId/deviceType, so
+    // the slot's deviceName/osVersion filter comes from the coordinator's
+    // allocate() record. Values on the config win when a caller provides them.
+    const slot = this.runLog.slotFor(poolDeviceId);
+    const configName = config.deviceName instanceof RegExp ? config.deviceName.source : config.deviceName;
     const criteria: AllocationCriteria = {
       platform: config.platform,
-      deviceType: config.deviceType,
-      osVersion: config.osVersion,
-      deviceNamePattern: config.deviceName instanceof RegExp ? config.deviceName.source : config.deviceName,
+      deviceType: config.deviceType ?? (slot?.deviceType as AllocationCriteria['deviceType']),
+      osVersion: config.osVersion ?? slot?.osVersion,
+      deviceNamePattern: configName ?? slot?.deviceNamePattern,
     };
     let pinned: PinnedDevice | undefined;
     if (criteria.deviceType === 'real') {
