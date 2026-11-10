@@ -114,6 +114,22 @@ export interface TestingBotDriverOptions {
    * on every test. Default: false (mobilewright's pool reuses sessions).
    */
   sessionPerTest?: boolean;
+  /**
+   * Appium settings applied once per session to speed up hierarchy polling.
+   * mobilewright reads the hierarchy every 100ms and waits for two identical
+   * reads, so the backend's own wait-for-idle before each read is wasted time.
+   * Default: `{ waitForIdleTimeout: 0 }`, plus `animationCoolOffTimeout: 0` on
+   * iOS. Entries here are merged over the defaults; `false` keeps the server's
+   * defaults.
+   */
+  snapshotTuning?: false | Record<string, unknown>;
+  /**
+   * How element visibility is judged. 'native' (default) uses the Appium
+   * backend's flag; 'bounds' counts any element with a non-empty frame as
+   * visible, matching local mobilecli. Use 'bounds' if `toBeVisible()` fails on
+   * iOS for elements that are on screen but overlapped by a sibling.
+   */
+  visibility?: 'native' | 'bounds';
 }
 
 export interface ResolvedOptions {
@@ -147,6 +163,8 @@ export interface ResolvedOptions {
   tbOptions: Record<string, unknown>;
   testResults: 'on' | 'off';
   sessionPerTest: boolean;
+  snapshotTuning: false | Record<string, unknown>;
+  visibility: 'native' | 'bounds';
 }
 
 /**
@@ -188,6 +206,8 @@ export function resolveOptions(options: TestingBotDriverOptions = {}): ResolvedO
     tbOptions: options.tbOptions ?? {},
     testResults: options.testResults ?? 'on',
     sessionPerTest: options.sessionPerTest ?? false,
+    snapshotTuning: options.snapshotTuning === false ? false : (options.snapshotTuning ?? {}),
+    visibility: options.visibility ?? 'native',
   };
 }
 

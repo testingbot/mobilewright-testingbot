@@ -8,7 +8,15 @@ import type { Bounds, Platform, ViewNode } from '@mobilewright/protocol';
  * role engine normalizes them itself (bareTypeName), and getByType matches
  * case-insensitively on the raw value.
  */
-export function parseHierarchy(xml: string, platform: Platform): ViewNode[] {
+/**
+ * How `isVisible` is judged. 'native' trusts the automation backend's own
+ * flag; 'bounds' treats any element with a non-empty frame as visible. XCUITest's
+ * `visible` is stricter than local mobilecli (an element drawn under a sibling
+ * reports invisible), so 'bounds' matches what suites developed locally expect.
+ */
+export type VisibilityMode = 'native' | 'bounds';
+
+export function parseHierarchy(xml: string, platform: Platform, visibility: VisibilityMode = 'native'): ViewNode[] {
   const parser = new XMLParser({
     ignoreAttributes: false,
     attributeNamePrefix: '',
@@ -17,7 +25,9 @@ export function parseHierarchy(xml: string, platform: Platform): ViewNode[] {
     parseAttributeValue: false,
   });
   const doc = parser.parse(xml) as OrderedNode[];
-  const mapper = platform === 'ios' ? mapIosNode : mapAndroidNode;
+  const mapper: NodeMapper = platform === 'ios'
+    ? (tag, attrs, children) => mapIosNode(tag, attrs, children, visibility)
+    : (tag, attrs, children) => mapAndroidNode(tag, attrs, children, visibility);
   return doc.flatMap((n) => convert(n, mapper));
 }
 
@@ -44,14 +54,14 @@ function convert(node: OrderedNode, mapper: NodeMapper): ViewNode[] {
   return mapped ? [mapped] : children;
 }
 
-function mapAndroidNode(tag: string, attrs: Record<string, string>, children: ViewNode[]): ViewNode | null {
+function mapAndroidNode(tag: string, attrs: Record<string, string>, children: ViewNode[], visibility: VisibilityMode): ViewNode | null {
   const type = attrs['class'] ?? tag;
   const bounds = parseAndroidBounds(attrs['bounds']);
   const node: ViewNode = {
     type,
     bounds,
     children,
-    isVisible: attrs['displayed'] !== 'false',
+    isVisible: visibility === 'bounds' ? hasArea(bounds) : attrs['displayed'] !== 'false',
     isEnabled: attrs['enabled'] !== 'false',
     raw: attrs,
   };
@@ -65,18 +75,19 @@ function mapAndroidNode(tag: string, attrs: Record<string, string>, children: Vi
   return node;
 }
 
-function mapIosNode(tag: string, attrs: Record<string, string>, children: ViewNode[]): ViewNode | null {
+function mapIosNode(tag: string, attrs: Record<string, string>, children: ViewNode[], visibility: VisibilityMode): ViewNode | null {
   const type = attrs['type'] ?? tag;
+  const bounds: Bounds = {
+    x: num(attrs['x']),
+    y: num(attrs['y']),
+    width: num(attrs['width']),
+    height: num(attrs['height']),
+  };
   const node: ViewNode = {
     type,
-    bounds: {
-      x: num(attrs['x']),
-      y: num(attrs['y']),
-      width: num(attrs['width']),
-      height: num(attrs['height']),
-    },
+    bounds,
     children,
-    isVisible: attrs['visible'] !== 'false',
+    isVisible: visibility === 'bounds' ? hasArea(bounds) : attrs['visible'] !== 'false',
     isEnabled: attrs['enabled'] !== 'false',
     raw: attrs,
   };
@@ -87,6 +98,10 @@ function mapIosNode(tag: string, attrs: Record<string, string>, children: ViewNo
   if (attrs['selected'] !== undefined) node.isSelected = attrs['selected'] === 'true';
   if (attrs['focused'] !== undefined) node.isFocused = attrs['focused'] === 'true';
   return node;
+}
+
+function hasArea(bounds: Bounds): boolean {
+  return bounds.width > 0 && bounds.height > 0;
 }
 
 /** Android bounds attribute: "[x1,y1][x2,y2]". */

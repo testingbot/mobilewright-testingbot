@@ -3,6 +3,7 @@ import createDebug from 'debug';
 import {
   NoDeviceAvailableError,
   type AllocatedDevice,
+  type Bounds,
   type AllocationCriteria,
   type AppInfo,
   type ConnectionConfig,
@@ -28,6 +29,7 @@ import {
 } from '@mobilewright/protocol';
 import {
   doubleTapActions,
+  edgeSwipeBackActions,
   gestureActions,
   longPressActions,
   swipeActions,
@@ -42,6 +44,7 @@ import { parseChord, toAndroidKeyPress, toW3CKeyActions, typeTextActions } from 
 import { TestingBotTestObserver } from './observer.js';
 import { requireCredentials, resolveOptions, type ResolvedOptions, type TestingBotDriverOptions } from './options.js';
 import { RestApiClient, type UserInfo } from './rest-api.js';
+import { transformPng } from './png.js';
 import { RunLog } from './run-log.js';
 import { setActiveDriver, type ThrottlePreset, type ThrottleProfile } from './session-commands.js';
 import { TunnelManager } from './tunnel.js';
@@ -103,6 +106,12 @@ const ANDROID_BUTTON_KEYCODES: Record<HardwareButton, number> = {
   DPAD_CENTER: 23,
   APP_SWITCH: 187,
   LOCK: 26, // same as POWER — locks the screen
+};
+
+/** Default snapshot tuning per platform (see the `snapshotTuning` option). */
+const SNAPSHOT_TUNING: Record<Platform, Record<string, unknown>> = {
+  android: { waitForIdleTimeout: 0 },
+  ios: { waitForIdleTimeout: 0, animationCoolOffTimeout: 0 },
 };
 
 // XCUITest's mobile: pressButton supports exactly these names on iOS.
@@ -282,6 +291,7 @@ export class TestingBotDriver implements MobilewrightDriver {
     }
 
     const platform = criteria.platform ?? (String(caps['platformName']).toLowerCase() === 'ios' ? 'ios' : 'android');
+    await this.applySnapshotTuning(sessionId, platform);
     const session: AllocatedSession = {
       sessionId,
       platform,
@@ -457,8 +467,25 @@ export class TestingBotDriver implements MobilewrightDriver {
     const capabilities = buildCapabilities(criteria, this.options, pinned, appUrls);
     const { sessionId } = await this.hub.newSession(capabilities, { timeout: this.options.allocationTimeout });
     this.runLog.append({ type: 'session', sessionId });
+    await this.applySnapshotTuning(sessionId, config.platform);
     debug('started per-test session %s — https://testingbot.com/members/tests/%s', sessionId, sessionId);
     return sessionId;
+  }
+
+  /**
+   * Turn off the backend's wait-for-idle before each page-source read (see the
+   * `snapshotTuning` option). Once per session, best-effort: a server that
+   * rejects a setting still leaves a working session.
+   */
+  private async applySnapshotTuning(sessionId: string, platform: Platform): Promise<void> {
+    if (this.options.snapshotTuning === false) return;
+    const settings = { ...SNAPSHOT_TUNING[platform], ...this.options.snapshotTuning };
+    try {
+      await this.hub.post(sessionId, '/appium/settings', { settings });
+      debug('snapshot tuning applied to %s: %o', sessionId, settings);
+    } catch (err) {
+      debug('snapshot tuning rejected on %s (%s), keeping server defaults', sessionId, err);
+    }
   }
 
   // ─── TestingBot-specific session commands ─────────────────────
@@ -513,7 +540,7 @@ export class TestingBotDriver implements MobilewrightDriver {
     const { sessionId, platform } = this.session();
     const xml = await this.hub.source(sessionId);
     const { parseHierarchy } = await import('./hierarchy.js');
-    return parseHierarchy(xml, platform);
+    return parseHierarchy(xml, platform, this.options.visibility);
   }
 
   // ─── MobilewrightSession: input ────────────────────────────────
@@ -568,8 +595,20 @@ export class TestingBotDriver implements MobilewrightDriver {
       await this.pressKeys(['ctrl+a', 'backspace']);
       return;
     }
-    // iOS has no working select-all chord; delete the focused field's value
-    // one backspace per character (hierarchy tells us how many).
+    // iOS: clear the focused field through its element reference. Backspaces
+    // only delete what is left of the caret, and tapping a field (React Native
+    // in particular) can put the caret at the start, so key-based deletion
+    // leaves the value untouched.
+    const active = await this.activeElementId(sessionId);
+    if (active) {
+      try {
+        await this.hub.post(sessionId, `/element/${active}/clear`, {});
+        return;
+      } catch (err) {
+        debug('clearText: element clear failed (%s), falling back to backspaces', err);
+      }
+    }
+    // Fallback: one backspace per character of the focused field's value.
     const { parseHierarchy } = await import('./hierarchy.js');
     const nodes = parseHierarchy(await this.hub.source(sessionId), 'ios');
     const focused = findFocused(nodes);
@@ -581,10 +620,20 @@ export class TestingBotDriver implements MobilewrightDriver {
     }
   }
 
+  /** WebDriver id of the focused element (GET /element/active), if any. */
+  private async activeElementId(sessionId: string): Promise<string | undefined> {
+    try {
+      const ref = await this.hub.get<Record<string, string> | null>(sessionId, '/element/active');
+      return ref?.['element-6066-11e4-a52e-4f304ffac5c0'] ?? ref?.['ELEMENT'];
+    } catch (err) {
+      debug('no active element (%s)', err);
+      return undefined;
+    }
+  }
+
   /**
-   * Neither Appium driver can replace a field's value without an element
-   * reference, and the protocol only hands us the focused field — so clear it
-   * the same way `clearText()` does, then type the new value.
+   * The protocol only hands us the focused field, so clear it the same way
+   * `clearText()` does, then type the new value.
    */
   async fill(text: string): Promise<void> {
     await this.clearText();
@@ -607,6 +656,13 @@ export class TestingBotDriver implements MobilewrightDriver {
       await this.hub.execute(sessionId, 'mobile: pressKey', [{ keycode: ANDROID_BUTTON_KEYCODES[button] }]);
       return;
     }
+    if (button === 'BACK') {
+      // iOS has no back button; screen.goBack() lands here. Use the system
+      // edge-swipe-back gesture that UINavigationController responds to.
+      const screen = await this.getScreenSize();
+      await this.hub.performActions(sessionId, edgeSwipeBackActions(screen));
+      return;
+    }
     const name = IOS_BUTTON_NAMES[button];
     if (!name) {
       throw new Error(`TestingBotDriver: hardware button "${button}" is not supported on iOS`);
@@ -616,11 +672,25 @@ export class TestingBotDriver implements MobilewrightDriver {
 
   // ─── MobilewrightSession: screen ───────────────────────────────
 
-  async screenshot(opts?: ScreenshotOptions): Promise<Buffer> {
+  async screenshot(opts?: ScreenshotOptions & { clip?: Bounds; scale?: number }): Promise<Buffer> {
     const { sessionId } = this.session();
     // TestingBot/Appium produce PNG; a jpeg format request falls back to PNG.
-    const base64 = await this.hub.screenshot(sessionId);
-    const buffer = Buffer.from(base64, 'base64');
+    let buffer: Buffer = Buffer.from(await this.hub.screenshot(sessionId), 'base64');
+    const factor = opts?.scale !== undefined && opts.scale > 0 && opts.scale < 1 ? opts.scale : 1;
+    if (opts?.clip || factor < 1) {
+      // `clip` is in screen points (locator.screenshot() passes element
+      // bounds); the PNG is in physical pixels.
+      const ratio = opts?.clip ? (await this.getScreenSize()).scale : 1;
+      const rect = opts?.clip && {
+        x: opts.clip.x * ratio,
+        y: opts.clip.y * ratio,
+        width: opts.clip.width * ratio,
+        height: opts.clip.height * ratio,
+      };
+      const transformed = transformPng(buffer, rect, factor);
+      if (transformed) buffer = transformed;
+      else debug('screenshot: could not crop/scale this PNG, returning the full screen');
+    }
     if (opts?.path) await writeFile(opts.path, buffer);
     return buffer;
   }
