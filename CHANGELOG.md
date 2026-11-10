@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.7.0 — unreleased
+
+### Added
+- **Exact per-test reporting.** The driver reads Playwright's `test.info()`
+  inside `connect()`/`disconnect()` (which run inside the test), so each
+  session's test and outcome are known exactly instead of reconstructed from
+  timestamps. With `sessionPerTest` each session is named after its test as it
+  starts (`describe › title (retry N)`) and gets its verdict when the test
+  ends; pooled sessions fail if any test on them failed. Every test in the
+  Playwright report links to its TestingBot session. The timing-based join
+  remains as the fallback.
+- **Element screenshots.** `locator.screenshot()` is cropped to the element
+  (points → pixels via the screen scale) and `screenshot({ scale })`
+  downscales; previously both returned the full screen.
+- **`screen.goBack()` on iOS** performs the system left-edge back swipe
+  instead of throwing.
+- **`snapshotTuning`** option, on by default: `waitForIdleTimeout: 0` (plus
+  `animationCoolOffTimeout: 0` on iOS) once per session. Measured on
+  production: fill + assert 7.3s → 3.5s on an Android emulator, 3.4s → 2.95s
+  on an iOS simulator. `false` keeps the server defaults.
+- **`visibility: 'bounds'`** option: judge `isVisible` by frame size, like
+  local mobilecli.
+- **`allocationRetryDelay`** option: a "no device available" error while the
+  run holds no session is retried with backoff (5s doubling to 30s) until
+  the pool gives up. mobilewright's pool only retries when one of its own
+  slots is released, so such a test previously idled until its timeout.
+
+### Fixed
+- `fill()` / `clearText()` on iOS now clear the focused field through its
+  element reference. XCUITest's page source has no focused flag, and React
+  Native fields put the caret at the start, so the old backspace fallback
+  never removed anything (`fill('7')` on a field holding `0` gave `70`).
+- Rotated `sessionPerTest` sessions now correct the test's `device.model` /
+  `device.osVersion` annotations, which described the pool slot's first
+  session.
+
 ## 0.6.0 — 2026-10-28
 
 Tracks `@mobilewright/protocol` 0.0.67.
