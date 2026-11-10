@@ -130,6 +130,12 @@ export interface TestingBotDriverOptions {
    * iOS for elements that are on screen but overlapped by a sibling.
    */
   visibility?: 'native' | 'bounds';
+  /**
+   * First delay, in ms, before retrying an allocation that failed with "no
+   * device available" while this run holds no session (doubles per attempt,
+   * capped at 30s). Default: 5000.
+   */
+  allocationRetryDelay?: number;
 }
 
 export interface ResolvedOptions {
@@ -165,6 +171,7 @@ export interface ResolvedOptions {
   sessionPerTest: boolean;
   snapshotTuning: false | Record<string, unknown>;
   visibility: 'native' | 'bounds';
+  allocationRetryDelay: number;
 }
 
 /**
@@ -208,6 +215,7 @@ export function resolveOptions(options: TestingBotDriverOptions = {}): ResolvedO
     sessionPerTest: options.sessionPerTest ?? false,
     snapshotTuning: options.snapshotTuning === false ? false : (options.snapshotTuning ?? {}),
     visibility: options.visibility ?? 'native',
+    allocationRetryDelay: options.allocationRetryDelay ?? 5_000,
   };
 }
 

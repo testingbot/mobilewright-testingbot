@@ -70,16 +70,37 @@ describe('pool lifecycle against FakeHub', () => {
     expect(hub.liveSessions()).toHaveLength(0);
   });
 
+  it('retries "no device available" itself while the run holds no session', async () => {
+    const driver = new TestingBotDriver({ ...driverOptions(), allocationRetryDelay: 20 });
+    hub.busyCount = 2;
+    const allocated = await driver.allocate({ platform: 'android' }, new Set(), new AbortController().signal);
+    expect(hub.requests.filter((r) => r.method === 'POST' && r.path === '/wd/hub/session')).toHaveLength(3);
+    await driver.release(allocated.deviceId);
+  });
+
+  it('stops retrying when the pool aborts', async () => {
+    const driver = new TestingBotDriver({ ...driverOptions(), allocationRetryDelay: 60_000 });
+    hub.busyCount = 1;
+    const controller = new AbortController();
+    const pending = driver.allocate({ platform: 'android' }, new Set(), controller.signal);
+    setTimeout(() => controller.abort(), 50);
+    await expect(pending).rejects.toBeInstanceOf(NoDeviceAvailableError);
+    expect(hub.liveSessions()).toHaveLength(0);
+  });
+
   it('session methods before connect() fail with a clear error', async () => {
     const worker = new TestingBotDriver(driverOptions());
     await expect(worker.tap(1, 1)).rejects.toThrow('No active session. Call connect() first.');
   });
 
   it('maps hub "busy" errors to NoDeviceAvailableError so the pool re-queues', async () => {
+    // A held session means the pool will retry on release — hand the error back.
+    const held = await coordinator.allocate({ platform: 'ios' }, new Set());
     hub.busyCount = 1;
     await expect(
       coordinator.allocate({ platform: 'android' }, new Set()),
     ).rejects.toBeInstanceOf(NoDeviceAvailableError);
+    await coordinator.release(held.deviceId);
     // Next attempt (the pool's retry) succeeds.
     const allocated = await coordinator.allocate({ platform: 'android' }, new Set());
     expect(hub.liveSessions()).toHaveLength(1);

@@ -204,7 +204,37 @@ export class TestingBotDriver implements MobilewrightDriver {
     await this.tunnel.start(this.options);
   }
 
+  /**
+   * mobilewright's pool re-queues a NoDeviceAvailableError and only retries
+   * when one of its own slots is released. With no session held by this run,
+   * nothing is ever released, so the test would idle until its allocation
+   * timeout even if a device frees up seconds later. Retry here instead, with
+   * backoff, until the pool's signal aborts (or allocationTimeout without one).
+   */
   async allocate(
+    criteria: AllocationCriteria,
+    takenDeviceIds: ReadonlySet<string>,
+    signal?: AbortSignal,
+  ): Promise<AllocatedDevice> {
+    const deadline = signal ? Infinity : Date.now() + this.options.allocationTimeout;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.allocateOnce(criteria, takenDeviceIds, signal);
+      } catch (err) {
+        if (!(err instanceof NoDeviceAvailableError) || signal?.aborted) throw err;
+        if (this.allocated.size > 0) {
+          debug('no device available; this run holds %d session(s), handing back to the pool', this.allocated.size);
+          throw err;
+        }
+        const delay = Math.min(this.options.allocationRetryDelay * 2 ** (attempt - 1), 30_000);
+        if (Date.now() + delay > deadline) throw err;
+        debug('no device available (%s); retry %d in %dms', err.message, attempt, delay);
+        if (!(await sleep(delay, signal))) throw err;
+      }
+    }
+  }
+
+  private async allocateOnce(
     criteria: AllocationCriteria,
     _takenDeviceIds: ReadonlySet<string>,
     signal?: AbortSignal,
@@ -1062,6 +1092,16 @@ function describeAllocation(criteria: AllocationCriteria): string {
 }
 
 /** Values usable directly as appium:app without an upload. */
+/** Resolves true after `ms`, or false as soon as `signal` aborts. */
+function sleep(ms: number, signal?: AbortSignal): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve(false);
+    const onAbort = () => { clearTimeout(timer); resolve(false); };
+    const timer = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(true); }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 function isRemoteApp(value: string): boolean {
   return /^(tb|https?):\/\//i.test(value);
 }
