@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.7.0 — unreleased
+## 0.7.0 — 2026-11-10
 
 ### Added
 - **Exact per-test reporting.** The driver reads Playwright's `test.info()`
