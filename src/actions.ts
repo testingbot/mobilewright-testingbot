@@ -75,6 +75,21 @@ export function swipeActions(
   ])];
 }
 
+/**
+ * iOS system back gesture: a quick swipe from the left screen edge to past the
+ * middle, at mid-height. UINavigationController's interactive pop recognizer
+ * needs the touch to start within a few points of the edge.
+ */
+export function edgeSwipeBackActions(screen: ScreenSize): PointerSource[] {
+  const y = screen.height / 2;
+  return [pointerSource('finger1', [
+    move(2, y),
+    down(),
+    move(screen.width * 0.6, y, 250),
+    up(),
+  ])];
+}
+
 /** Multi-finger gesture: each pointer path becomes one W3C input source,
  *  with `time` offsets converted to per-segment move durations. */
 export function gestureActions(gestures: GestureSequence): PointerSource[] {

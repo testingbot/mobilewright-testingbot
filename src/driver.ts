@@ -3,6 +3,7 @@ import createDebug from 'debug';
 import {
   NoDeviceAvailableError,
   type AllocatedDevice,
+  type Bounds,
   type AllocationCriteria,
   type AppInfo,
   type ConnectionConfig,
@@ -28,6 +29,7 @@ import {
 } from '@mobilewright/protocol';
 import {
   doubleTapActions,
+  edgeSwipeBackActions,
   gestureActions,
   longPressActions,
   swipeActions,
@@ -42,7 +44,10 @@ import { parseChord, toAndroidKeyPress, toW3CKeyActions, typeTextActions } from 
 import { TestingBotTestObserver } from './observer.js';
 import { requireCredentials, resolveOptions, type ResolvedOptions, type TestingBotDriverOptions } from './options.js';
 import { RestApiClient, type UserInfo } from './rest-api.js';
+import { transformPng } from './png.js';
 import { RunLog } from './run-log.js';
+import { attemptName, attemptOutcome, currentTestInfo } from './test-info.js';
+import { exactVerdict } from './observer.js';
 import { setActiveDriver, type ThrottlePreset, type ThrottleProfile } from './session-commands.js';
 import { TunnelManager } from './tunnel.js';
 import { AppiumWebViewBridge } from './webview.js';
@@ -103,6 +108,12 @@ const ANDROID_BUTTON_KEYCODES: Record<HardwareButton, number> = {
   DPAD_CENTER: 23,
   APP_SWITCH: 187,
   LOCK: 26, // same as POWER — locks the screen
+};
+
+/** Default snapshot tuning per platform (see the `snapshotTuning` option). */
+const SNAPSHOT_TUNING: Record<Platform, Record<string, unknown>> = {
+  android: { waitForIdleTimeout: 0 },
+  ios: { waitForIdleTimeout: 0, animationCoolOffTimeout: 0 },
 };
 
 // XCUITest's mobile: pressButton supports exactly these names on iOS.
@@ -193,7 +204,37 @@ export class TestingBotDriver implements MobilewrightDriver {
     await this.tunnel.start(this.options);
   }
 
+  /**
+   * mobilewright's pool re-queues a NoDeviceAvailableError and only retries
+   * when one of its own slots is released. With no session held by this run,
+   * nothing is ever released, so the test would idle until its allocation
+   * timeout even if a device frees up seconds later. Retry here instead, with
+   * backoff, until the pool's signal aborts (or allocationTimeout without one).
+   */
   async allocate(
+    criteria: AllocationCriteria,
+    takenDeviceIds: ReadonlySet<string>,
+    signal?: AbortSignal,
+  ): Promise<AllocatedDevice> {
+    const deadline = signal ? Infinity : Date.now() + this.options.allocationTimeout;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.allocateOnce(criteria, takenDeviceIds, signal);
+      } catch (err) {
+        if (!(err instanceof NoDeviceAvailableError) || signal?.aborted) throw err;
+        if (this.allocated.size > 0) {
+          debug('no device available; this run holds %d session(s), handing back to the pool', this.allocated.size);
+          throw err;
+        }
+        const delay = Math.min(this.options.allocationRetryDelay * 2 ** (attempt - 1), 30_000);
+        if (Date.now() + delay > deadline) throw err;
+        debug('no device available (%s); retry %d in %dms', err.message, attempt, delay);
+        if (!(await sleep(delay, signal))) throw err;
+      }
+    }
+  }
+
+  private async allocateOnce(
     criteria: AllocationCriteria,
     _takenDeviceIds: ReadonlySet<string>,
     signal?: AbortSignal,
@@ -282,6 +323,7 @@ export class TestingBotDriver implements MobilewrightDriver {
     }
 
     const platform = criteria.platform ?? (String(caps['platformName']).toLowerCase() === 'ios' ? 'ios' : 'android');
+    await this.applySnapshotTuning(sessionId, platform);
     const session: AllocatedSession = {
       sessionId,
       platform,
@@ -361,6 +403,7 @@ export class TestingBotDriver implements MobilewrightDriver {
       await this.hub.get(poolDeviceId, '/orientation', { timeout });
       this.active = { sessionId: poolDeviceId, platform: config.platform, deviceType: config.deviceType, connectedAt: Date.now() };
       setActiveDriver(this);
+      this.annotateTest(poolDeviceId);
       debug('connected to session %s', poolDeviceId);
       return { deviceId: poolDeviceId, platform: config.platform };
     }
@@ -380,9 +423,16 @@ export class TestingBotDriver implements MobilewrightDriver {
       }
       this.rotatedDeviceIds.add(poolDeviceId);
     }
-    sessionId ??= await this.startFreshSession(config, poolDeviceId);
+    let rotated: { model?: string; osVersion?: string } | undefined;
+    if (!sessionId) {
+      const fresh = await this.startFreshSession(config, poolDeviceId);
+      sessionId = fresh.sessionId;
+      rotated = { model: fresh.model, osVersion: fresh.osVersion };
+    }
     this.active = { sessionId, platform: config.platform, deviceType: config.deviceType, connectedAt: Date.now() };
     setActiveDriver(this);
+    await this.nameSessionAfterTest(sessionId);
+    this.annotateTest(sessionId, rotated);
     debug('connected to session %s (slot %s)', sessionId, poolDeviceId);
     return { deviceId: poolDeviceId, platform: config.platform };
   }
@@ -397,18 +447,28 @@ export class TestingBotDriver implements MobilewrightDriver {
     // session it cannot attribute gets no verdict at all. Nothing in teardown
     // — a hub round-trip, a hung request, the worker dying — may come between
     // the test ending and this line.
+    const info = currentTestInfo();
+    const outcome = info && attemptOutcome(info);
     this.runLog.append({
       type: 'session',
       sessionId: session.sessionId,
       startedAt: session.connectedAt,
       endedAt: Date.now(),
       workerIndex: workerIndex(),
+      ...(outcome ? { test: outcome } : {}),
     });
     if (session.throttled) {
       // A pooled session outlives the test: reset network conditions so they
       // cannot leak into whichever test gets this slot next.
       await this.hub.execute(session.sessionId, 'tb:throttle', ['disable']).catch((err) => {
         debug('could not reset throttling on %s: %s', session.sessionId, err);
+      });
+    }
+    if (this.options.sessionPerTest && outcome && this.options.testResults !== 'off') {
+      // This session hosted exactly this attempt: report its verdict now, while
+      // the session is alive, instead of relying on the run-end observer alone.
+      await this.api.updateTest(session.sessionId, exactVerdict([outcome])).catch((err) => {
+        debug('could not report verdict for %s: %s', session.sessionId, err);
       });
     }
     if (!this.options.sessionPerTest) {
@@ -426,7 +486,10 @@ export class TestingBotDriver implements MobilewrightDriver {
   }
 
   /** Create a new hub session for this slot from the connect() config. */
-  private async startFreshSession(config: ConnectionConfig, poolDeviceId: string): Promise<string> {
+  private async startFreshSession(
+    config: ConnectionConfig,
+    poolDeviceId: string,
+  ): Promise<{ sessionId: string; model?: string; osVersion?: string }> {
     // mobilewright's connect() passes only platform/deviceId/deviceType, so
     // the slot's deviceName/osVersion filter comes from the coordinator's
     // allocate() record. Values on the config win when a caller provides them.
@@ -455,10 +518,56 @@ export class TestingBotDriver implements MobilewrightDriver {
       }
     }
     const capabilities = buildCapabilities(criteria, this.options, pinned, appUrls);
-    const { sessionId } = await this.hub.newSession(capabilities, { timeout: this.options.allocationTimeout });
+    const { sessionId, capabilities: caps } = await this.hub.newSession(capabilities, { timeout: this.options.allocationTimeout });
     this.runLog.append({ type: 'session', sessionId });
+    await this.applySnapshotTuning(sessionId, config.platform);
     debug('started per-test session %s — https://testingbot.com/members/tests/%s', sessionId, sessionId);
-    return sessionId;
+    return {
+      sessionId,
+      model: pinned?.deviceName ?? str(caps['appium:deviceName'] ?? caps['deviceName']),
+      osVersion: pinned?.platformVersion ?? str(caps['appium:platformVersion'] ?? caps['platformVersion']),
+    };
+  }
+
+  /**
+   * Link the running test to its TestingBot session in Playwright's report.
+   * A rotated per-test session can land on a different device than the pool
+   * slot's first one, so the fixture's device annotations are corrected too.
+   */
+  private annotateTest(sessionId: string, device?: { model?: string; osVersion?: string }): void {
+    const info = currentTestInfo();
+    if (!info) return;
+    info.annotations.push({ type: 'TestingBot', description: `https://testingbot.com/members/tests/${sessionId}` });
+    for (const annotation of info.annotations) {
+      if (annotation.type === 'device.model' && device?.model) annotation.description = device.model;
+      if (annotation.type === 'device.osVersion' && device?.osVersion) annotation.description = device.osVersion;
+    }
+  }
+
+  /** sessionPerTest: name the session after its test as soon as it starts. */
+  private async nameSessionAfterTest(sessionId: string): Promise<void> {
+    if (this.options.testResults === 'off') return;
+    const info = currentTestInfo();
+    if (!info) return;
+    await this.api.updateTest(sessionId, { name: attemptName(info) }).catch((err) => {
+      debug('could not name session %s: %s', sessionId, err);
+    });
+  }
+
+  /**
+   * Turn off the backend's wait-for-idle before each page-source read (see the
+   * `snapshotTuning` option). Once per session, best-effort: a server that
+   * rejects a setting still leaves a working session.
+   */
+  private async applySnapshotTuning(sessionId: string, platform: Platform): Promise<void> {
+    if (this.options.snapshotTuning === false) return;
+    const settings = { ...SNAPSHOT_TUNING[platform], ...this.options.snapshotTuning };
+    try {
+      await this.hub.post(sessionId, '/appium/settings', { settings });
+      debug('snapshot tuning applied to %s: %o', sessionId, settings);
+    } catch (err) {
+      debug('snapshot tuning rejected on %s (%s), keeping server defaults', sessionId, err);
+    }
   }
 
   // ─── TestingBot-specific session commands ─────────────────────
@@ -513,7 +622,7 @@ export class TestingBotDriver implements MobilewrightDriver {
     const { sessionId, platform } = this.session();
     const xml = await this.hub.source(sessionId);
     const { parseHierarchy } = await import('./hierarchy.js');
-    return parseHierarchy(xml, platform);
+    return parseHierarchy(xml, platform, this.options.visibility);
   }
 
   // ─── MobilewrightSession: input ────────────────────────────────
@@ -568,8 +677,20 @@ export class TestingBotDriver implements MobilewrightDriver {
       await this.pressKeys(['ctrl+a', 'backspace']);
       return;
     }
-    // iOS has no working select-all chord; delete the focused field's value
-    // one backspace per character (hierarchy tells us how many).
+    // iOS: clear the focused field through its element reference. Backspaces
+    // only delete what is left of the caret, and tapping a field (React Native
+    // in particular) can put the caret at the start, so key-based deletion
+    // leaves the value untouched.
+    const active = await this.activeElementId(sessionId);
+    if (active) {
+      try {
+        await this.hub.post(sessionId, `/element/${active}/clear`, {});
+        return;
+      } catch (err) {
+        debug('clearText: element clear failed (%s), falling back to backspaces', err);
+      }
+    }
+    // Fallback: one backspace per character of the focused field's value.
     const { parseHierarchy } = await import('./hierarchy.js');
     const nodes = parseHierarchy(await this.hub.source(sessionId), 'ios');
     const focused = findFocused(nodes);
@@ -581,10 +702,20 @@ export class TestingBotDriver implements MobilewrightDriver {
     }
   }
 
+  /** WebDriver id of the focused element (GET /element/active), if any. */
+  private async activeElementId(sessionId: string): Promise<string | undefined> {
+    try {
+      const ref = await this.hub.get<Record<string, string> | null>(sessionId, '/element/active');
+      return ref?.['element-6066-11e4-a52e-4f304ffac5c0'] ?? ref?.['ELEMENT'];
+    } catch (err) {
+      debug('no active element (%s)', err);
+      return undefined;
+    }
+  }
+
   /**
-   * Neither Appium driver can replace a field's value without an element
-   * reference, and the protocol only hands us the focused field — so clear it
-   * the same way `clearText()` does, then type the new value.
+   * The protocol only hands us the focused field, so clear it the same way
+   * `clearText()` does, then type the new value.
    */
   async fill(text: string): Promise<void> {
     await this.clearText();
@@ -607,6 +738,13 @@ export class TestingBotDriver implements MobilewrightDriver {
       await this.hub.execute(sessionId, 'mobile: pressKey', [{ keycode: ANDROID_BUTTON_KEYCODES[button] }]);
       return;
     }
+    if (button === 'BACK') {
+      // iOS has no back button; screen.goBack() lands here. Use the system
+      // edge-swipe-back gesture that UINavigationController responds to.
+      const screen = await this.getScreenSize();
+      await this.hub.performActions(sessionId, edgeSwipeBackActions(screen));
+      return;
+    }
     const name = IOS_BUTTON_NAMES[button];
     if (!name) {
       throw new Error(`TestingBotDriver: hardware button "${button}" is not supported on iOS`);
@@ -616,11 +754,25 @@ export class TestingBotDriver implements MobilewrightDriver {
 
   // ─── MobilewrightSession: screen ───────────────────────────────
 
-  async screenshot(opts?: ScreenshotOptions): Promise<Buffer> {
+  async screenshot(opts?: ScreenshotOptions & { clip?: Bounds; scale?: number }): Promise<Buffer> {
     const { sessionId } = this.session();
     // TestingBot/Appium produce PNG; a jpeg format request falls back to PNG.
-    const base64 = await this.hub.screenshot(sessionId);
-    const buffer = Buffer.from(base64, 'base64');
+    let buffer: Buffer = Buffer.from(await this.hub.screenshot(sessionId), 'base64');
+    const factor = opts?.scale !== undefined && opts.scale > 0 && opts.scale < 1 ? opts.scale : 1;
+    if (opts?.clip || factor < 1) {
+      // `clip` is in screen points (locator.screenshot() passes element
+      // bounds); the PNG is in physical pixels.
+      const ratio = opts?.clip ? (await this.getScreenSize()).scale : 1;
+      const rect = opts?.clip && {
+        x: opts.clip.x * ratio,
+        y: opts.clip.y * ratio,
+        width: opts.clip.width * ratio,
+        height: opts.clip.height * ratio,
+      };
+      const transformed = transformPng(buffer, rect, factor);
+      if (transformed) buffer = transformed;
+      else debug('screenshot: could not crop/scale this PNG, returning the full screen');
+    }
     if (opts?.path) await writeFile(opts.path, buffer);
     return buffer;
   }
@@ -940,6 +1092,16 @@ function describeAllocation(criteria: AllocationCriteria): string {
 }
 
 /** Values usable directly as appium:app without an upload. */
+/** Resolves true after `ms`, or false as soon as `signal` aborts. */
+function sleep(ms: number, signal?: AbortSignal): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve(false);
+    const onAbort = () => { clearTimeout(timer); resolve(false); };
+    const timer = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(true); }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 function isRemoteApp(value: string): boolean {
   return /^(tb|https?):\/\//i.test(value);
 }

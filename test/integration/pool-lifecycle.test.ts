@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { NoDeviceAvailableError } from '@mobilewright/protocol';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { TestingBotDriver } from '../../src/driver.js';
+import { setPlaywrightTestForTesting, type CurrentTestInfo } from '../../src/test-info.js';
 import { FakeHub } from '../fake-hub/fake-hub.js';
 
 /**
@@ -69,16 +70,37 @@ describe('pool lifecycle against FakeHub', () => {
     expect(hub.liveSessions()).toHaveLength(0);
   });
 
+  it('retries "no device available" itself while the run holds no session', async () => {
+    const driver = new TestingBotDriver({ ...driverOptions(), allocationRetryDelay: 20 });
+    hub.busyCount = 2;
+    const allocated = await driver.allocate({ platform: 'android' }, new Set(), new AbortController().signal);
+    expect(hub.requests.filter((r) => r.method === 'POST' && r.path === '/wd/hub/session')).toHaveLength(3);
+    await driver.release(allocated.deviceId);
+  });
+
+  it('stops retrying when the pool aborts', async () => {
+    const driver = new TestingBotDriver({ ...driverOptions(), allocationRetryDelay: 60_000 });
+    hub.busyCount = 1;
+    const controller = new AbortController();
+    const pending = driver.allocate({ platform: 'android' }, new Set(), controller.signal);
+    setTimeout(() => controller.abort(), 50);
+    await expect(pending).rejects.toBeInstanceOf(NoDeviceAvailableError);
+    expect(hub.liveSessions()).toHaveLength(0);
+  });
+
   it('session methods before connect() fail with a clear error', async () => {
     const worker = new TestingBotDriver(driverOptions());
     await expect(worker.tap(1, 1)).rejects.toThrow('No active session. Call connect() first.');
   });
 
   it('maps hub "busy" errors to NoDeviceAvailableError so the pool re-queues', async () => {
+    // A held session means the pool will retry on release — hand the error back.
+    const held = await coordinator.allocate({ platform: 'ios' }, new Set());
     hub.busyCount = 1;
     await expect(
       coordinator.allocate({ platform: 'android' }, new Set()),
     ).rejects.toBeInstanceOf(NoDeviceAvailableError);
+    await coordinator.release(held.deviceId);
     // Next attempt (the pool's retry) succeeds.
     const allocated = await coordinator.allocate({ platform: 'android' }, new Set());
     expect(hub.liveSessions()).toHaveLength(1);
@@ -313,6 +335,50 @@ describe('sessionPerTest against FakeHub', () => {
     await coordinator.observer!.onRunEnd?.({ status: 'passed', startTime: new Date(0), duration: 1 });
     expect(hub.testUpdates.get(allocated.deviceId)).toMatchObject({ 'test[success]': '1' });
     expect(hub.testUpdates.get(fresh.id)).toMatchObject({ 'test[success]': '1' });
+  });
+
+  it('names, annotates and reports each rotated session from test.info()', async () => {
+    let current: CurrentTestInfo | undefined;
+    setPlaywrightTestForTesting({ test: { info: () => { if (!current) throw new Error('no test'); return current; } } });
+    const testInfo = (title: string, retry = 0): CurrentTestInfo => ({
+      testId: title, title, titlePath: ['f.test.ts', title], retry, expectedStatus: 'passed', errors: [],
+      annotations: [{ type: 'device.model', description: 'first-slot-device' }], project: { name: 'ios' },
+    });
+    try {
+      const coordinator = new TestingBotDriver(options());
+      await coordinator.prepare();
+      const allocated = await coordinator.allocate({ platform: 'ios', deviceType: 'simulator' }, new Set());
+      const worker = new TestingBotDriver(options());
+
+      current = testInfo('passes');
+      await worker.connect({ platform: 'ios', deviceId: allocated.deviceId, deviceType: 'simulator' });
+      expect(hub.testUpdates.get(allocated.deviceId)).toMatchObject({ 'test[name]': 'passes' });
+      expect(current.annotations).toContainEqual({ type: 'TestingBot', description: `https://testingbot.com/members/tests/${allocated.deviceId}` });
+      current.status = 'passed';
+      await worker.disconnect();
+      expect(hub.testUpdates.get(allocated.deviceId)).toMatchObject({ 'test[success]': '1' });
+
+      current = testInfo('fails', 1);
+      await worker.connect({ platform: 'ios', deviceId: allocated.deviceId, deviceType: 'simulator' });
+      const second = hub.liveSessions()[0]!.id;
+      expect(hub.testUpdates.get(second)).toMatchObject({ 'test[name]': 'fails (retry 1)' });
+      current.status = 'failed';
+      current.errors = [{ message: 'Error: nope\n  at x' }];
+      await worker.disconnect();
+      expect(hub.testUpdates.get(second)).toMatchObject({ 'test[success]': '0', 'test[status_message]': 'Error: nope' });
+      current = undefined;
+
+      await coordinator.release(allocated.deviceId);
+      await coordinator.dispose();
+      // The observer agrees with the in-test verdicts — no run aggregate leaks in.
+      coordinator.observer!.onRunStart?.({ totalTests: 2 });
+      coordinator.observer!.onTestEnd?.({ id: 'x', title: 'x', titlePath: [] }, { status: 'failed', retry: 0, duration: 1, errors: [], steps: [] });
+      await coordinator.observer!.onRunEnd?.({ status: 'failed', startTime: new Date(0), duration: 1 });
+      expect(hub.testUpdates.get(allocated.deviceId)).toMatchObject({ 'test[success]': '1', 'test[name]': 'passes' });
+      expect(hub.testUpdates.get(second)).toMatchObject({ 'test[success]': '0' });
+    } finally {
+      setPlaywrightTestForTesting(undefined);
+    }
   });
 
   it('keeps the slot\'s deviceName/osVersion filter on rotated sessions', async () => {

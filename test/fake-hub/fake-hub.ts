@@ -42,6 +42,10 @@ export class FakeHub {
   launcherActivityMissing = false;
   /** Extra delay (ms) before answering POST /session. */
   allocationDelay = 0;
+  /** PNG served by /screenshot (defaults to a 1x1 image). */
+  screenshotPng: Buffer | undefined;
+  /** W3C element id GET /element/active returns; undefined = no focused element. */
+  activeElementId: string | undefined;
 
   private server: Server | undefined;
   private port = 0;
@@ -133,7 +137,11 @@ export class FakeHub {
         case '/window/rect':
           return wd({ x: 0, y: 0, width: 393, height: 852 });
         case '/screenshot':
-          return wd(TINY_PNG.toString('base64'));
+          return wd((this.screenshotPng ?? TINY_PNG).toString('base64'));
+        case '/element/active':
+          return this.activeElementId
+            ? wd({ 'element-6066-11e4-a52e-4f304ffac5c0': this.activeElementId })
+            : wd({ error: 'no such element', message: 'no focused element' }, 404);
         case '/source': {
           const platform = String(session.capabilities['platformName'] ?? 'iOS');
           const fixture = platform.toLowerCase() === 'android' ? 'android-page-source.xml' : 'ios-page-source.xml';

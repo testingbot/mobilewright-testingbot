@@ -93,9 +93,11 @@ Regexes and version ranges work on both real and virtual devices: real devices r
 
 ## Sessions, naming, and reporting
 
-- By default a device slot's TestingBot session is reused across tests (fast: you pay device startup once). Sessions that hosted exactly one test are named after that test with its own pass/fail; sessions that hosted several get a run summary (e.g. `12/12 tests passed`).
-- Set **`sessionPerTest: true`** for one session, video, and named verdict **per test** — the clearest dashboard, at the cost of device startup on every test.
-- Tests are matched to sessions by **worker identity first**: the driver stamps Playwright's worker index on each session as it records it, and the run report reports the same index per test, so a test that ran in another worker process is never a candidate. Timing separates the tests within one worker, using the worker's own timestamps from the report when it is available.
+- By default a device slot's TestingBot session is reused across tests (fast: you pay device startup once). Sessions that hosted exactly one test are named after that test with its own pass/fail; sessions that hosted several pass only if every test on them passed (e.g. `1 of 3 tests failed. checkout › pays: ...`).
+- Set **`sessionPerTest: true`** for one session, video, and named verdict **per test** — the clearest dashboard, at the cost of device startup on every test. The session is named after the test as soon as it starts (`describe › title`, plus `(retry N)` on retries), and its verdict is reported the moment the test ends, while the session is still alive.
+- Each test in Playwright's HTML report gets a **`TestingBot`** annotation linking to the session (and its video) that test ran on.
+- Tests are matched to sessions **exactly**: `connect()`/`disconnect()` run inside the test, so the driver reads Playwright's `test.info()` there and records which test attempt ran on which session, with its outcome. The heuristic below is only the fallback when `@playwright/test` cannot be resolved from the project.
+- Fallback: tests are matched to sessions by **worker identity first**: the driver stamps Playwright's worker index on each session as it records it, and the run report reports the same index per test, so a test that ran in another worker process is never a candidate. Timing separates the tests within one worker, using the worker's own timestamps from the report when it is available.
 - A session is only ever given a verdict the driver can stand behind: its own test's, or the run summary when it genuinely hosted several tests (or was the run's only session). When a session cannot be tied to a test — an ambiguous overlap under heavy parallelism, or a worker that died before recording its span — it is reported with build, extra and tags but **no** pass/fail, rather than inheriting a failure from a test that ran somewhere else. `DEBUG=testingbot:observer` names the session and the reason.
 - Git metadata is reported automatically when mobilewright captures it: the commit hash, branch, author and subject land in the session's **extra** field (alongside your own `extra`, never replacing it), and the branch is added as a **tag** so the dashboard can filter by it. Enable it with `captureGitInfo: { commit: true }` in `mobilewright.config.ts` — Playwright turns it on by itself in CI.
 - Failure messages are reported to the session's status message; `build` groups sessions on the dashboard and **defaults automatically from CI environments** (GitHub Actions, GitLab, CircleCI, Buildkite, Bitrise, Travis, Azure DevOps, Jenkins, TeamCity → e.g. `owner/repo #123`), or from a `TESTINGBOT_BUILD` variable.
@@ -114,6 +116,14 @@ new TestingBotDriver({
   name: 'checkout flow',      // session name (default 'mobilewright'; per-test names override)
   build: 'ci-1234',           // default: auto-detected from CI env / TESTINGBOT_BUILD
   testResults: 'on',          // 'off' disables pass/fail reporting
+
+  snapshotTuning: {},         // Appium settings applied once per session; default turns off
+                              // the wait-for-idle before each hierarchy read (much faster
+                              // assertions while the UI animates). false = server defaults
+  visibility: 'native',       // 'bounds' = any element with a non-empty frame is visible
+                              // (mobilecli-like; helps iOS toBeVisible() on overlapped views)
+  allocationRetryDelay: 5_000,// first backoff (ms) when no device is free and the run holds
+                              // no session yet; doubles up to 30s until the pool gives up
 
   allocationTimeout: 395_000, // ms to wait for a device (TestingBot queues busy devices)
   idleTimeout: 230,           // seconds before TestingBot reaps an idle session
@@ -246,6 +256,8 @@ jobs:
 | `cannot install "..." mid-session` | TestingBot has no mid-session installs — every app in `installApps` must also be listed in the driver's `apps` option (first entry = app under test, the rest install as helper apps). |
 | Modifier chords fail on iOS | XCUITest cannot hold modifier keys; chords are Android-only (`clearText()` handles iOS differently). |
 | Sessions show the run summary instead of a test name | The session hosted several tests; `sessionPerTest: true` gives each test its own session. |
+| An iOS project never gets a device in a mixed Android + iOS run | mobilewright's pool keeps idle slots of the other platform. Run each platform in its own `mobilewright test --project ...` invocation, or raise `workers`. |
+| `toBeVisible()` fails on iOS for an element that is on screen | XCUITest reports elements drawn under a sibling as invisible. Set `visibility: 'bounds'`. |
 | A session shows no pass/fail at all | The driver could not tell which test ran in it and declined to guess. Run with `DEBUG=testingbot:observer` — it logs the session id and why. |
 | `DEBUG=testingbot:*` | Prints every allocation, hub command, upload, and report the driver performs. |
 
@@ -265,11 +277,11 @@ jobs:
 
 ## Current limitations
 
-- One TestingBot session may host several mobilewright tests unless `sessionPerTest: true`; multi-test sessions report the run-level verdict.
-- The worker process that owns a session is never told which test it is running, so the session-to-test join is reconstructed after the run from Playwright's worker index plus timing. Without the run report (`jsonReport()`) it degrades to timing alone. Either way it is deliberately conservative and leaves a session unjudged rather than risk naming it after the wrong test.
+- One TestingBot session may host several mobilewright tests unless `sessionPerTest: true`; a multi-test session keeps one name and fails if any test on it failed.
+- **Run Android and iOS projects in separate invocations** (`--project android`, then `--project ios`) unless `workers` exceeds the number of projects. mobilewright's device pool never evicts an idle slot of one platform to make room for the other, so with every slot holding an Android session an iOS test waits until it times out.
 - Modifier key chords (`pressKeys(['ctrl+a'])`) work on Android only — XCUITest cannot hold modifier keys.
-- `pressButton` on iOS supports `HOME`, `VOLUME_UP`, `VOLUME_DOWN`; `listApps()` reports the foreground app only.
-- Screenshots are always PNG, and `screenshot({ clip })` is not honoured yet — the full screen comes back uncropped. `applyDeviceSettings` turns Android animations off best-effort via `mobile: shell` (a no-op on iOS).
+- `pressButton` on iOS supports `HOME`, `VOLUME_UP`, `VOLUME_DOWN`, and `BACK` (performed as the system left-edge swipe, so `screen.goBack()` works in navigation stacks); `listApps()` reports the foreground app only.
+- Screenshots are always PNG. `locator.screenshot()` is cropped to the element and `screenshot({ scale })` downscales. `applyDeviceSettings` turns Android animations off best-effort via `mobile: shell` (a no-op on iOS).
 - `setGeolocation` needs the platform driver's location extension to be available: emulators and simulators always are, real devices depend on the OS version TestingBot's Appium build supports (iOS 17+ for XCUITest).
 - `setFoldState` (protocol 0.0.62) throws: Appium has no hinge control for TestingBot's foldables.
 - Real iOS devices need a test-signed `.ipa`; simulator builds are rejected on real devices with a clear error.
@@ -284,6 +296,14 @@ npm run build
 ```
 
 Live e2e tests against a real TestingBot account live in `e2e/` (see `e2e/mobilewright.config.ts`).
+
+`e2e/live.config.ts` runs feature checks (hierarchy speed, fill, element screenshots, iOS back navigation, per-test reporting) against TestingBot's public sample app, so it needs no local builds:
+
+```bash
+cd e2e && npm install --no-save mobilewright@latest @mobilewright/test@latest
+TESTINGBOT_KEY=... TESTINGBOT_SECRET=... npx mobilewright test -c live.config.ts --project android-emulator
+# E2E_SESSION_PER_TEST=1, E2E_FORCE_FAIL=1, E2E_RETRIES=1, E2E_VISIBILITY=bounds, E2E_NO_TUNING=1 toggle scenarios
+```
 
 ### Releasing
 

@@ -4,3 +4,5 @@ dist/
 e2e/mobilewright-report/
 e2e/test-results/
 .DS_Store
+e2e/live-report.json
+e2e/live-html/
