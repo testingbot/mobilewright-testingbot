@@ -2,6 +2,7 @@ import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
+import type { AttemptOutcome } from './test-info.js';
 
 /**
  * Tiny JSONL file shared between the coordinator process (allocator half,
@@ -24,6 +25,9 @@ export interface SessionRecord {
    *  reports the same index per test, so a session can be matched against the
    *  tests of its own worker instead of every test in the run. */
   workerIndex?: number;
+  /** The test attempt that ran in this connect/disconnect cycle, read from
+   *  Playwright's test.info() inside the worker — an exact join, when present. */
+  test?: AttemptOutcome;
 }
 
 export interface AppRecord {
@@ -68,6 +72,8 @@ export interface MergedSession {
    *  recorded cycle agrees, since a pooled slot re-granted across workers has
    *  no single owner. */
   workerIndex?: number;
+  /** Test attempts recorded for this session (one per span, when known). */
+  tests: AttemptOutcome[];
 }
 
 export class RunLog {
@@ -117,7 +123,8 @@ export class RunLog {
     const workersSeen = new Map<string, Set<number>>();
     for (const record of this.read()) {
       if (record.type !== 'session') continue;
-      const merged = byId.get(record.sessionId) ?? { sessionId: record.sessionId, spans: 0 };
+      const merged = byId.get(record.sessionId) ?? { sessionId: record.sessionId, spans: 0, tests: [] };
+      if (record.test) merged.tests.push(record.test);
       if (record.startedAt !== undefined && record.endedAt !== undefined) {
         merged.spans += 1;
         merged.startedAt = Math.min(merged.startedAt ?? record.startedAt, record.startedAt);

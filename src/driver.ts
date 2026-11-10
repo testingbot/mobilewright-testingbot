@@ -46,6 +46,8 @@ import { requireCredentials, resolveOptions, type ResolvedOptions, type TestingB
 import { RestApiClient, type UserInfo } from './rest-api.js';
 import { transformPng } from './png.js';
 import { RunLog } from './run-log.js';
+import { attemptName, attemptOutcome, currentTestInfo } from './test-info.js';
+import { exactVerdict } from './observer.js';
 import { setActiveDriver, type ThrottlePreset, type ThrottleProfile } from './session-commands.js';
 import { TunnelManager } from './tunnel.js';
 import { AppiumWebViewBridge } from './webview.js';
@@ -371,6 +373,7 @@ export class TestingBotDriver implements MobilewrightDriver {
       await this.hub.get(poolDeviceId, '/orientation', { timeout });
       this.active = { sessionId: poolDeviceId, platform: config.platform, deviceType: config.deviceType, connectedAt: Date.now() };
       setActiveDriver(this);
+      this.annotateTest(poolDeviceId);
       debug('connected to session %s', poolDeviceId);
       return { deviceId: poolDeviceId, platform: config.platform };
     }
@@ -390,9 +393,16 @@ export class TestingBotDriver implements MobilewrightDriver {
       }
       this.rotatedDeviceIds.add(poolDeviceId);
     }
-    sessionId ??= await this.startFreshSession(config, poolDeviceId);
+    let rotated: { model?: string; osVersion?: string } | undefined;
+    if (!sessionId) {
+      const fresh = await this.startFreshSession(config, poolDeviceId);
+      sessionId = fresh.sessionId;
+      rotated = { model: fresh.model, osVersion: fresh.osVersion };
+    }
     this.active = { sessionId, platform: config.platform, deviceType: config.deviceType, connectedAt: Date.now() };
     setActiveDriver(this);
+    await this.nameSessionAfterTest(sessionId);
+    this.annotateTest(sessionId, rotated);
     debug('connected to session %s (slot %s)', sessionId, poolDeviceId);
     return { deviceId: poolDeviceId, platform: config.platform };
   }
@@ -407,18 +417,28 @@ export class TestingBotDriver implements MobilewrightDriver {
     // session it cannot attribute gets no verdict at all. Nothing in teardown
     // — a hub round-trip, a hung request, the worker dying — may come between
     // the test ending and this line.
+    const info = currentTestInfo();
+    const outcome = info && attemptOutcome(info);
     this.runLog.append({
       type: 'session',
       sessionId: session.sessionId,
       startedAt: session.connectedAt,
       endedAt: Date.now(),
       workerIndex: workerIndex(),
+      ...(outcome ? { test: outcome } : {}),
     });
     if (session.throttled) {
       // A pooled session outlives the test: reset network conditions so they
       // cannot leak into whichever test gets this slot next.
       await this.hub.execute(session.sessionId, 'tb:throttle', ['disable']).catch((err) => {
         debug('could not reset throttling on %s: %s', session.sessionId, err);
+      });
+    }
+    if (this.options.sessionPerTest && outcome && this.options.testResults !== 'off') {
+      // This session hosted exactly this attempt: report its verdict now, while
+      // the session is alive, instead of relying on the run-end observer alone.
+      await this.api.updateTest(session.sessionId, exactVerdict([outcome])).catch((err) => {
+        debug('could not report verdict for %s: %s', session.sessionId, err);
       });
     }
     if (!this.options.sessionPerTest) {
@@ -436,7 +456,10 @@ export class TestingBotDriver implements MobilewrightDriver {
   }
 
   /** Create a new hub session for this slot from the connect() config. */
-  private async startFreshSession(config: ConnectionConfig, poolDeviceId: string): Promise<string> {
+  private async startFreshSession(
+    config: ConnectionConfig,
+    poolDeviceId: string,
+  ): Promise<{ sessionId: string; model?: string; osVersion?: string }> {
     // mobilewright's connect() passes only platform/deviceId/deviceType, so
     // the slot's deviceName/osVersion filter comes from the coordinator's
     // allocate() record. Values on the config win when a caller provides them.
@@ -465,11 +488,40 @@ export class TestingBotDriver implements MobilewrightDriver {
       }
     }
     const capabilities = buildCapabilities(criteria, this.options, pinned, appUrls);
-    const { sessionId } = await this.hub.newSession(capabilities, { timeout: this.options.allocationTimeout });
+    const { sessionId, capabilities: caps } = await this.hub.newSession(capabilities, { timeout: this.options.allocationTimeout });
     this.runLog.append({ type: 'session', sessionId });
     await this.applySnapshotTuning(sessionId, config.platform);
     debug('started per-test session %s — https://testingbot.com/members/tests/%s', sessionId, sessionId);
-    return sessionId;
+    return {
+      sessionId,
+      model: pinned?.deviceName ?? str(caps['appium:deviceName'] ?? caps['deviceName']),
+      osVersion: pinned?.platformVersion ?? str(caps['appium:platformVersion'] ?? caps['platformVersion']),
+    };
+  }
+
+  /**
+   * Link the running test to its TestingBot session in Playwright's report.
+   * A rotated per-test session can land on a different device than the pool
+   * slot's first one, so the fixture's device annotations are corrected too.
+   */
+  private annotateTest(sessionId: string, device?: { model?: string; osVersion?: string }): void {
+    const info = currentTestInfo();
+    if (!info) return;
+    info.annotations.push({ type: 'TestingBot', description: `https://testingbot.com/members/tests/${sessionId}` });
+    for (const annotation of info.annotations) {
+      if (annotation.type === 'device.model' && device?.model) annotation.description = device.model;
+      if (annotation.type === 'device.osVersion' && device?.osVersion) annotation.description = device.osVersion;
+    }
+  }
+
+  /** sessionPerTest: name the session after its test as soon as it starts. */
+  private async nameSessionAfterTest(sessionId: string): Promise<void> {
+    if (this.options.testResults === 'off') return;
+    const info = currentTestInfo();
+    if (!info) return;
+    await this.api.updateTest(sessionId, { name: attemptName(info) }).catch((err) => {
+      debug('could not name session %s: %s', sessionId, err);
+    });
   }
 
   /**

@@ -7,7 +7,8 @@ import type {
   TestResultInfo,
   TestRunInfo,
 } from '@mobilewright/protocol';
-import type { RestApiClient } from './rest-api.js';
+import type { RestApiClient, TestUpdate } from './rest-api.js';
+import type { AttemptOutcome } from './test-info.js';
 
 const debug = createDebug('testingbot:observer');
 
@@ -20,6 +21,8 @@ export interface ReportableSession {
   endedAt?: number;
   /** Worker process that ran this session's test, when unambiguous. */
   workerIndex?: number;
+  /** Test attempts the worker recorded from test.info(), one per span. */
+  tests?: AttemptOutcome[];
 }
 
 export interface GitInfo {
@@ -129,8 +132,22 @@ export class TestingBotTestObserver implements TestObserver {
     const sessions = this.context.sessions();
     debug('run ended (%s), reporting to %d session(s)%s', result.status, sessions.length,
       git ? ` with git ${git.commit?.slice(0, 8) ?? '?'} (${git.branch ?? 'no branch'})` : '');
-    const attributed = this.attribute(sessions, outcomes);
+    // Sessions whose every span recorded its test attempt need no heuristic.
+    const exact = new Map(sessions
+      .filter((s) => s.spans > 0 && s.tests?.length === s.spans)
+      .map((s) => [s.sessionId, exactVerdict(s.tests!)]));
+    const attributed = this.attribute(sessions.filter((s) => !exact.has(s.sessionId)), outcomes);
     for (const session of sessions) {
+      const verdict = exact.get(session.sessionId);
+      if (verdict) {
+        try {
+          await this.api.updateTest(session.sessionId, { ...verdict, build: this.context.build, extra, groups });
+          debug('reported %s -> exact %o', session.sessionId, verdict);
+        } catch (err) {
+          console.warn(`TestingBotDriver: could not report result for session ${session.sessionId}: ${String(err)}`);
+        }
+        continue;
+      }
       const test = attributed.get(session.sessionId);
       // An unattributable session must never inherit the run's failure: on a
       // failed run that would stamp another test's verdict onto a session
@@ -301,6 +318,26 @@ export class TestingBotTestObserver implements TestObserver {
     }
     return attributed;
   }
+}
+
+/**
+ * Name and verdict from the attempts recorded inside the session itself. One
+ * attempt names the session after it; a pooled session that hosted several
+ * keeps its name and fails if any attempt on it failed. Skipped attempts carry
+ * no verdict.
+ */
+export function exactVerdict(tests: AttemptOutcome[]): Pick<TestUpdate, 'name' | 'success' | 'statusMessage'> {
+  const ran = tests.filter((t) => t.status !== 'skipped');
+  const failed = ran.filter((t) => t.status === 'failed');
+  const name = tests.length === 1 ? tests[0]!.title : undefined;
+  if (ran.length === 0) return { ...(name ? { name } : {}), statusMessage: 'skipped' };
+  const statusMessage = failed.length === 0
+    ? (ran.length === 1 ? 'passed' : `${ran.length} tests passed`)
+    : (ran.length === 1
+      ? `${failed[0]!.error ?? 'failed'}`
+      : `${failed.length} of ${ran.length} tests failed. ${failed.map((t) => `${t.title}: ${t.error ?? 'failed'}`).join(' | ')}`
+    ).slice(0, 500);
+  return { ...(name ? { name } : {}), success: failed.length === 0, statusMessage };
 }
 
 /**

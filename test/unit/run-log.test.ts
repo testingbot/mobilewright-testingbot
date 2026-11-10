@@ -12,7 +12,7 @@ describe('RunLog.sessions', () => {
     const log = runLog();
     log.append({ type: 'session', sessionId: 's1', startedAt: 100, endedAt: 200 });
     log.append({ type: 'session', sessionId: 's1', startedAt: 300, endedAt: 400 });
-    expect(log.sessions()).toEqual([{ sessionId: 's1', spans: 2, startedAt: 100, endedAt: 400 }]);
+    expect(log.sessions()).toEqual([{ sessionId: 's1', spans: 2, startedAt: 100, endedAt: 400, tests: [] }]);
   });
 
   it('keeps the worker index a session was recorded from', () => {
@@ -39,7 +39,7 @@ describe('RunLog.sessions', () => {
   it('records an untimed session with no spans and survives a truncated line', () => {
     const log = runLog();
     log.append({ type: 'session', sessionId: 's1' });
-    expect(log.sessions()).toEqual([{ sessionId: 's1', spans: 0 }]);
+    expect(log.sessions()).toEqual([{ sessionId: 's1', spans: 0, tests: [] }]);
     log.truncate();
     expect(log.sessions()).toEqual([]);
   });
