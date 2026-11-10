@@ -41,7 +41,22 @@ export interface RecordingRecord {
   output: string;
 }
 
-type Record_ = SessionRecord | AppRecord | RecordingRecord;
+/**
+ * The criteria a pool slot was allocated with. mobilewright's connect() only
+ * forwards platform/deviceId/deviceType, so a worker rotating sessions
+ * (sessionPerTest) looks the slot's deviceName/osVersion filter up here —
+ * without it every rotated session would land on an arbitrary device.
+ */
+export interface SlotRecord {
+  type: 'slot';
+  /** The pool deviceId — the WebDriver session id allocate() returned. */
+  deviceId: string;
+  deviceType?: string;
+  osVersion?: string;
+  deviceNamePattern?: string;
+}
+
+type Record_ = SessionRecord | AppRecord | RecordingRecord | SlotRecord;
 
 export interface MergedSession {
   sessionId: string;
@@ -128,6 +143,10 @@ export class RunLog {
 
   recordings(): RecordingRecord[] {
     return this.read().filter((r): r is RecordingRecord => r.type === 'recording');
+  }
+
+  slotFor(deviceId: string): SlotRecord | undefined {
+    return this.read().find((r): r is SlotRecord => r.type === 'slot' && r.deviceId === deviceId);
   }
 
   appUrlsFor(platform: string, deviceType: string | undefined): string[] | undefined {

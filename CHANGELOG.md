@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.0 — 2026-10-28
+
+Tracks `@mobilewright/protocol` 0.0.67.
+
+### Added
+- `fill(text)` — required by `MobilewrightSession` as of protocol 0.0.67.
+  Clears the focused field (as `clearText()` does), then types `text`;
+  `fill('')` only clears.
+- `clearAppData(bundleId)` — required as of protocol 0.0.67. Routed through
+  Appium's `mobile: clearApp` (`pm clear` on Android, which also resets runtime
+  permissions; simulator-only on iOS).
+
 ## 0.5.0 — 2026-09-30
 
 Tracks `@mobilewright/protocol` 0.0.62.
