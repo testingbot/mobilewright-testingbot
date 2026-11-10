@@ -315,6 +315,31 @@ describe('sessionPerTest against FakeHub', () => {
     expect(hub.testUpdates.get(fresh.id)).toMatchObject({ 'test[success]': '1' });
   });
 
+  it('keeps the slot\'s deviceName/osVersion filter on rotated sessions', async () => {
+    // mobilewright's connect() forwards only platform/deviceId/deviceType, so
+    // the rotated session must recover the filter from the allocate() record —
+    // otherwise it lands on any real device (e.g. an old "Pixel" on 7.1).
+    const opts = { ...options(), apps: { android: 'tb://prebuilt-android' } as const };
+    const coordinator = new TestingBotDriver(opts);
+    await coordinator.prepare();
+    const allocated = await coordinator.allocate(
+      { platform: 'android', deviceType: 'real', deviceNamePattern: '^(Pixel 8|Galaxy S23)$', osVersion: '>=12' },
+      new Set(),
+    );
+    expect(hub.liveSessions()[0]!.capabilities['appium:deviceName']).toBe('Pixel 8');
+
+    const worker = new TestingBotDriver(opts);
+    await worker.connect({ platform: 'android', deviceId: allocated.deviceId, deviceType: 'real' });
+    await worker.disconnect();
+    await worker.connect({ platform: 'android', deviceId: allocated.deviceId, deviceType: 'real' });
+    const rotated = hub.liveSessions()[0]!;
+    expect(rotated.id).not.toBe(allocated.deviceId);
+    expect(rotated.capabilities['appium:deviceName']).toBe('Pixel 8');
+    expect(rotated.capabilities['appium:platformVersion']).toBe('14');
+    await worker.disconnect();
+    await coordinator.dispose();
+  });
+
   it('never reports one test\'s failure on the session another test ran in', async () => {
     // The reported defect, end to end through the real run file: two per-test
     // sessions, the first test passes and the second fails. FakeHub sessions
